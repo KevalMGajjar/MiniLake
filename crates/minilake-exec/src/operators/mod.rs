@@ -7,6 +7,8 @@
 pub mod aggregate;
 pub mod collect;
 pub mod filter;
+pub mod join;
+pub mod limit;
 pub mod projection;
 pub mod scan;
 pub mod sort;

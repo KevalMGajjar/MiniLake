@@ -58,6 +58,8 @@ pub struct BufferSource {
     pub buffer: Arc<BatchBuffer>,
     /// Display name.
     pub label: String,
+    /// Batches are sorted; replay them in order.
+    pub ordered: bool,
     /// Snapshot taken at the first `num_morsels` call.
     snapshot: Mutex<Option<Arc<Vec<Batch>>>>,
 }
@@ -68,8 +70,15 @@ impl BufferSource {
         BufferSource {
             buffer,
             label: label.into(),
+            ordered: false,
             snapshot: Mutex::new(None),
         }
+    }
+
+    /// Mark the replayed batches as ordered.
+    pub fn ordered(mut self) -> Self {
+        self.ordered = true;
+        self
     }
 
     fn batches(&self) -> Arc<Vec<Batch>> {
@@ -88,6 +97,10 @@ impl Source for BufferSource {
 
     fn num_morsels(&self) -> usize {
         self.batches().len()
+    }
+
+    fn preserves_order(&self) -> bool {
+        self.ordered
     }
 
     fn read_morsel(

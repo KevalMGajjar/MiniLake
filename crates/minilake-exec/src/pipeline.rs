@@ -34,6 +34,11 @@ pub trait Source: Send + Sync {
     fn name(&self) -> String;
     /// Number of morsels; called once when the pipeline starts.
     fn num_morsels(&self) -> usize;
+    /// True if morsels must be consumed in order (output of a sort). Such
+    /// pipelines run on a single thread so the order is preserved.
+    fn preserves_order(&self) -> bool {
+        false
+    }
     /// Produce the batches of morsel `i`, handing each to `emit`.
     fn read_morsel(
         &self,

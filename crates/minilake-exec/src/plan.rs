@@ -70,6 +70,30 @@ pub enum PhysicalPlan {
         /// keep only the first `limit` rows (top-N)
         limit: Option<usize>,
     },
+    /// Inner equi hash join. Output columns are always `left ++ right`.
+    HashJoin {
+        /// streaming side
+        probe: Box<PhysicalPlan>,
+        /// side materialized into the hash table
+        build: Box<PhysicalPlan>,
+        /// key expressions over the probe side
+        probe_keys: Vec<PhysicalExpr>,
+        /// key expressions over the build side
+        build_keys: Vec<PhysicalExpr>,
+        /// is the build side the logical left input?
+        build_is_left: bool,
+        /// output schema (left ++ right)
+        schema: SchemaRef,
+    },
+    /// LIMIT / OFFSET.
+    Limit {
+        /// input
+        input: Box<PhysicalPlan>,
+        /// max rows
+        limit: usize,
+        /// rows to skip
+        offset: usize,
+    },
 }
 
 impl PhysicalPlan {
@@ -77,7 +101,10 @@ impl PhysicalPlan {
     pub fn schema(&self) -> SchemaRef {
         match self {
             PhysicalPlan::Scan(s) => s.schema.clone(),
-            PhysicalPlan::Filter { input, .. } | PhysicalPlan::Sort { input, .. } => input.schema(),
+            PhysicalPlan::Filter { input, .. }
+            | PhysicalPlan::Sort { input, .. }
+            | PhysicalPlan::Limit { input, .. } => input.schema(),
+            PhysicalPlan::HashJoin { schema, .. } => schema.clone(),
             PhysicalPlan::Projection { schema, .. } | PhysicalPlan::Aggregate { schema, .. } => {
                 schema.clone()
             }
@@ -91,7 +118,9 @@ impl PhysicalPlan {
             PhysicalPlan::Filter { input, .. }
             | PhysicalPlan::Projection { input, .. }
             | PhysicalPlan::Aggregate { input, .. }
-            | PhysicalPlan::Sort { input, .. } => vec![input],
+            | PhysicalPlan::Sort { input, .. }
+            | PhysicalPlan::Limit { input, .. } => vec![input],
+            PhysicalPlan::HashJoin { probe, build, .. } => vec![build, probe],
         }
     }
 
@@ -170,6 +199,26 @@ impl PhysicalPlan {
                     Some(n) => format!("TopN: n={n} keys=[{}]", k.join(", ")),
                     None => format!("Sort: [{}]", k.join(", ")),
                 }
+            }
+            PhysicalPlan::HashJoin {
+                probe_keys,
+                build_keys,
+                build_is_left,
+                ..
+            } => {
+                let k: Vec<String> = build_keys
+                    .iter()
+                    .zip(probe_keys)
+                    .map(|(b, p)| format!("{b} = {p}"))
+                    .collect();
+                format!(
+                    "HashJoin: on=[{}] build={} (first child = build side)",
+                    k.join(", "),
+                    if *build_is_left { "left" } else { "right" }
+                )
+            }
+            PhysicalPlan::Limit { limit, offset, .. } => {
+                format!("Limit: {limit} offset={offset}")
             }
         }
     }

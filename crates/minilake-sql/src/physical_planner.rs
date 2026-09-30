@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use minilake_core::{MiniLakeError, Result, ScalarValue};
+use minilake_core::{DataType, MiniLakeError, Result, ScalarValue};
 use minilake_exec::expr::{LikePattern, PhysicalExpr};
 use minilake_exec::operators::aggregate::{AggMode, AggregateExpr, AggregateFunction};
 use minilake_exec::operators::sort::SortKey;
@@ -98,13 +98,127 @@ pub fn create_physical_plan(plan: &LogicalPlan) -> Result<PhysicalPlan> {
                 input: Box::new(create_physical_plan(input)?),
             }
         }
-        other => {
-            return Err(MiniLakeError::Unsupported(format!(
-                "physical planning for {}",
-                other.display_tree().lines().next().unwrap_or("")
-            )))
+        LogicalPlan::Join {
+            left,
+            right,
+            on,
+            schema,
+        } => {
+            let (ls, rs) = (left.schema(), right.schema());
+            let mut lkeys = Vec::with_capacity(on.len());
+            let mut rkeys = Vec::with_capacity(on.len());
+            for (l, r) in on {
+                let (lt, rt) = (l.data_type(&ls)?, r.data_type(&rs)?);
+                let mut lk = to_physical_expr(l, &ls)?;
+                let mut rk = to_physical_expr(r, &rs)?;
+                // Both sides must hash and compare in the same representation.
+                if lt != rt {
+                    let t = DataType::numeric_supertype(lt, rt).ok_or_else(|| {
+                        MiniLakeError::Plan(format!("cannot join {l} ({lt}) with {r} ({rt})"))
+                    })?;
+                    lk = cast(lk, lt, t);
+                    rk = cast(rk, rt, t);
+                }
+                lkeys.push(lk);
+                rkeys.push(rk);
+            }
+            // Join ordering rule: the side with the smaller estimated
+            // cardinality is materialized into the hash table.
+            let build_is_left = estimate_rows(left) <= estimate_rows(right);
+            let (lp, rp) = (create_physical_plan(left)?, create_physical_plan(right)?);
+            let (build, probe, build_keys, probe_keys) = if build_is_left {
+                (lp, rp, lkeys, rkeys)
+            } else {
+                (rp, lp, rkeys, lkeys)
+            };
+            PhysicalPlan::HashJoin {
+                probe: Box::new(probe),
+                build: Box::new(build),
+                probe_keys,
+                build_keys,
+                build_is_left,
+                schema: Arc::new(schema.to_schema()),
+            }
+        }
+        LogicalPlan::Limit {
+            input,
+            limit,
+            offset,
+        } => {
+            // ORDER BY + LIMIT -> top-N: never sort more than limit+offset rows.
+            if let LogicalPlan::Sort { .. } = input.as_ref() {
+                let PhysicalPlan::Sort { input: si, keys, .. } = create_physical_plan(input)? else {
+                    return Err(MiniLakeError::Internal("expected sort".into()));
+                };
+                let top = PhysicalPlan::Sort {
+                    input: si,
+                    keys,
+                    limit: Some(limit.saturating_add(*offset)),
+                };
+                if *offset == 0 {
+                    top
+                } else {
+                    PhysicalPlan::Limit {
+                        input: Box::new(top),
+                        limit: *limit,
+                        offset: *offset,
+                    }
+                }
+            } else {
+                PhysicalPlan::Limit {
+                    input: Box::new(create_physical_plan(input)?),
+                    limit: *limit,
+                    offset: *offset,
+                }
+            }
         }
     })
+}
+
+fn cast(e: PhysicalExpr, from: DataType, to: DataType) -> PhysicalExpr {
+    if from == to {
+        e
+    } else {
+        PhysicalExpr::Cast {
+            expr: Box::new(e),
+            to,
+        }
+    }
+}
+
+/// Crude cardinality estimate used by the join ordering rule.
+///
+/// * scan: table rows (after row-group pruning), times 1/2 per pushed filter
+/// * filter: 1/2 per conjunct
+/// * aggregate: 1/10 of the input (1 row if ungrouped)
+/// * join: the larger input (assumes a key/foreign-key join)
+///
+/// These are textbook default selectivities, not statistics; see DESIGN.md.
+pub fn estimate_rows(plan: &LogicalPlan) -> f64 {
+    match plan {
+        LogicalPlan::Scan { table, filters, .. } => {
+            (table.num_rows() as f64 * 0.5f64.powi(filters.len() as i32)).max(1.0)
+        }
+        LogicalPlan::Filter { input, predicate } => {
+            let mut conj = Vec::new();
+            predicate.clone().split_conjunction(&mut conj);
+            (estimate_rows(input) * 0.5f64.powi(conj.len() as i32)).max(1.0)
+        }
+        LogicalPlan::Projection { input, .. } | LogicalPlan::Sort { input, .. } => {
+            estimate_rows(input)
+        }
+        LogicalPlan::Aggregate {
+            input, group_exprs, ..
+        } => {
+            if group_exprs.is_empty() {
+                1.0
+            } else {
+                (estimate_rows(input) / 10.0).max(1.0)
+            }
+        }
+        LogicalPlan::Join { left, right, .. } => estimate_rows(left).max(estimate_rows(right)),
+        LogicalPlan::Limit { input, limit, .. } => estimate_rows(input).min(*limit as f64),
+    }
 }
 
 fn to_aggregate_expr(e: &Expr, schema: &LogicalSchema) -> Result<AggregateExpr> {

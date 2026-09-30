@@ -19,6 +19,8 @@ use crate::context::{ExecConfig, TaskContext};
 use crate::metrics::OperatorMetrics;
 use crate::operators::aggregate::hash::HashAggregateSink;
 use crate::operators::aggregate::ungrouped::UngroupedAggregateSink;
+use crate::operators::join::{HashJoinProbe, JoinBuildSink};
+use crate::operators::limit::LimitSink;
 use crate::operators::sort::SortSink;
 use crate::operators::collect::{BufferSource, CollectSink};
 use crate::operators::filter::FilterOperator;
@@ -70,6 +72,12 @@ pub(crate) struct PipelineBuilder {
 impl PipelineBuilder {
     pub fn metrics_for(&mut self, plan: &PhysicalPlan) -> Arc<OperatorMetrics> {
         self.metrics.entry(plan.node_id()).or_default().clone()
+    }
+
+    /// Separate metrics for the build half of a join (key: node id + 1; node
+    /// addresses are 8-byte aligned so this never collides with another node).
+    pub fn build_metrics_for(&mut self, plan: &PhysicalPlan) -> Arc<OperatorMetrics> {
+        self.metrics.entry(plan.node_id() + 1).or_default().clone()
     }
 
     /// Close `open` with `sink`.
@@ -164,7 +172,61 @@ impl PipelineBuilder {
                 let output = sink.output();
                 let label = sink.name();
                 self.close(p, sink, m.clone());
-                Ok(self.replay(output, &label, m))
+                let mut open = self.replay(output.clone(), &label, m);
+                open.source = Arc::new(BufferSource::new(output, label).ordered());
+                Ok(open)
+            }
+            PhysicalPlan::HashJoin {
+                probe,
+                build,
+                probe_keys,
+                build_keys,
+                build_is_left,
+                ..
+            } => {
+                // Build side first: its pipeline(s) must finish before probing.
+                let b = self.build(build)?;
+                let key_types = build_keys
+                    .iter()
+                    .map(|k| k.data_type(&build.schema()))
+                    .collect::<Result<Vec<_>>>()?;
+                let sink = Arc::new(JoinBuildSink::new(
+                    build_keys.clone(),
+                    key_types.clone(),
+                    build.schema().len(),
+                ));
+                let table = sink.table();
+                let build_metrics = self.build_metrics_for(plan);
+                self.close(b, sink, build_metrics);
+                let mut p = self.build(probe)?;
+                p.operators.push((
+                    Arc::new(HashJoinProbe {
+                        table,
+                        keys: probe_keys.clone(),
+                        key_types,
+                        build_is_left: *build_is_left,
+                        batch_size: self.ctx.config.batch_size,
+                    }),
+                    m,
+                ));
+                Ok(p)
+            }
+            PhysicalPlan::Limit {
+                input,
+                limit,
+                offset,
+            } => {
+                let p = self.build(input)?;
+                let ordered = p.source.preserves_order();
+                let sink = Arc::new(LimitSink::new(*limit, *offset));
+                let output = sink.output();
+                let label = sink.name();
+                self.close(p, sink, m.clone());
+                let mut open = self.replay(output.clone(), &label, m);
+                if ordered {
+                    open.source = Arc::new(BufferSource::new(output, label).ordered());
+                }
+                Ok(open)
             }
         }
     }
