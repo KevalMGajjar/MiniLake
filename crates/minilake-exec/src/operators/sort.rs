@@ -15,6 +15,8 @@ use minilake_core::{Batch, Column, ColumnData, MiniLakeError, Result};
 
 use crate::context::TaskContext;
 use crate::expr::{evaluate_to_column, PhysicalExpr};
+use crate::memory::MemoryReservation;
+use crate::metrics::OperatorMetrics;
 use crate::operators::aggregate::hash::split;
 use crate::pipeline::{BatchBuffer, LocalSink, Sink};
 
@@ -135,8 +137,9 @@ fn column_schema(b: &Batch) -> minilake_core::Schema {
 struct Inner {
     keys: Vec<SortKey>,
     limit: Option<usize>,
-    global: Mutex<Vec<Batch>>,
+    global: Mutex<(Vec<Batch>, Vec<MemoryReservation>)>,
     output: Arc<BatchBuffer>,
+    metrics: Arc<OperatorMetrics>,
 }
 
 /// Sort / top-N pipeline breaker.
@@ -146,13 +149,14 @@ pub struct SortSink {
 
 impl SortSink {
     /// `limit = Some(n)` makes this a top-N.
-    pub fn new(keys: Vec<SortKey>, limit: Option<usize>) -> Self {
+    pub fn new(keys: Vec<SortKey>, limit: Option<usize>, metrics: Arc<OperatorMetrics>) -> Self {
         SortSink {
             inner: Arc::new(Inner {
                 keys,
                 limit,
-                global: Mutex::new(Vec::new()),
+                global: Mutex::new((Vec::new(), Vec::new())),
                 output: BatchBuffer::new(),
+                metrics,
             }),
         }
     }
@@ -167,6 +171,7 @@ struct SortLocal {
     inner: Arc<Inner>,
     batches: Vec<Batch>,
     rows: usize,
+    reservation: MemoryReservation,
 }
 
 impl SortLocal {
@@ -175,6 +180,7 @@ impl SortLocal {
         if let Some(l) = self.inner.limit {
             if let Some(b) = sort_batches(&self.batches, &self.inner.keys, Some(l))? {
                 self.rows = b.num_rows();
+                self.reservation.try_resize(b.memory_size())?;
                 self.batches = vec![b];
             }
         }
@@ -190,22 +196,28 @@ impl Sink for SortSink {
         }
     }
 
-    fn create_local(&self, _ctx: &TaskContext) -> Result<Box<dyn LocalSink>> {
+    fn create_local(&self, ctx: &TaskContext) -> Result<Box<dyn LocalSink>> {
         Ok(Box::new(SortLocal {
             inner: self.inner.clone(),
             batches: Vec::new(),
             rows: 0,
+            reservation: MemoryReservation::new(&ctx.memory_pool, "Sort"),
         }))
     }
 
     fn finalize(&self, ctx: &TaskContext) -> Result<()> {
-        let all = std::mem::take(
+        let (all, reservations) = std::mem::take(
             &mut *self
                 .inner
                 .global
                 .lock()
                 .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?,
         );
+        // Sorting concatenates the input once more (plus the permutation).
+        let input_bytes: usize = reservations.iter().map(|r| r.size()).sum();
+        let mut scratch = MemoryReservation::new(&ctx.memory_pool, "Sort(merge)");
+        scratch.try_grow(input_bytes)?;
+        self.inner.metrics.update_peak_memory(input_bytes * 2);
         let out = match sort_batches(&all, &self.inner.keys, self.inner.limit)? {
             Some(b) => split(b, ctx.config.batch_size),
             None => Vec::new(),
@@ -218,7 +230,9 @@ impl Sink for SortSink {
 impl LocalSink for SortLocal {
     fn sink(&mut self, batch: Batch) -> Result<()> {
         self.rows += batch.active_rows();
-        self.batches.push(batch.compact());
+        let b = batch.compact();
+        self.reservation.try_grow(b.memory_size())?;
+        self.batches.push(b);
         if let Some(l) = self.inner.limit {
             if self.rows > (4 * l).max(16_384) {
                 self.truncate()?;
@@ -229,11 +243,18 @@ impl LocalSink for SortLocal {
 
     fn combine(mut self: Box<Self>) -> Result<()> {
         self.truncate()?;
-        self.inner
+        let SortLocal {
+            inner,
+            batches,
+            reservation,
+            ..
+        } = *self;
+        let mut g = inner
             .global
             .lock()
-            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?
-            .extend(self.batches);
+            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?;
+        g.0.extend(batches);
+        g.1.push(reservation);
         Ok(())
     }
 }

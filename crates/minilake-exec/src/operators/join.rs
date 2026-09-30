@@ -25,6 +25,8 @@ use minilake_hashtable::{Probe, SwissTable};
 use crate::context::TaskContext;
 use crate::expr::{evaluate_to_column, PhysicalExpr};
 use crate::kernels::hash::{hash_columns, values_equal};
+use crate::memory::MemoryReservation;
+use crate::metrics::OperatorMetrics;
 use crate::operators::aggregate::{batch_rows, Rows};
 use crate::pipeline::{LocalSink, Operator, Sink};
 
@@ -60,7 +62,10 @@ struct BuildInner {
     key_types: Vec<DataType>,
     num_columns: usize,
     batches: Mutex<Vec<Batch>>,
+    /// Keeps the build side's memory reserved until the query ends.
+    reservations: Mutex<Vec<MemoryReservation>>,
     table: JoinTableRef,
+    metrics: Arc<OperatorMetrics>,
 }
 
 /// Build side of the hash join.
@@ -70,14 +75,21 @@ pub struct JoinBuildSink {
 
 impl JoinBuildSink {
     /// New build sink; `num_columns` is the build side's column count.
-    pub fn new(keys: Vec<PhysicalExpr>, key_types: Vec<DataType>, num_columns: usize) -> Self {
+    pub fn new(
+        keys: Vec<PhysicalExpr>,
+        key_types: Vec<DataType>,
+        num_columns: usize,
+        metrics: Arc<OperatorMetrics>,
+    ) -> Self {
         JoinBuildSink {
             inner: Arc::new(BuildInner {
                 keys,
                 key_types,
                 num_columns,
                 batches: Mutex::new(Vec::new()),
+                reservations: Mutex::new(Vec::new()),
                 table: Arc::new(OnceLock::new()),
+                metrics,
             }),
         }
     }
@@ -91,6 +103,7 @@ impl JoinBuildSink {
 struct BuildLocal {
     inner: Arc<BuildInner>,
     batches: Vec<Batch>,
+    reservation: MemoryReservation,
 }
 
 impl Sink for JoinBuildSink {
@@ -98,14 +111,15 @@ impl Sink for JoinBuildSink {
         "HashJoinBuild".into()
     }
 
-    fn create_local(&self, _ctx: &TaskContext) -> Result<Box<dyn LocalSink>> {
+    fn create_local(&self, ctx: &TaskContext) -> Result<Box<dyn LocalSink>> {
         Ok(Box::new(BuildLocal {
             inner: self.inner.clone(),
             batches: Vec::new(),
+            reservation: MemoryReservation::new(&ctx.memory_pool, "HashJoinBuild"),
         }))
     }
 
-    fn finalize(&self, _ctx: &TaskContext) -> Result<()> {
+    fn finalize(&self, ctx: &TaskContext) -> Result<()> {
         let batches = std::mem::take(
             &mut *self
                 .inner
@@ -113,7 +127,21 @@ impl Sink for JoinBuildSink {
                 .lock()
                 .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?,
         );
+        let collected: usize = batches.iter().map(|b| b.memory_size()).sum();
         let table = build_table(&batches, &self.inner.keys, &self.inner.key_types, self.inner.num_columns)?;
+        drop(batches);
+        // The concatenated build batch replaces the collected batches; reserve
+        // the hash table and chains on top of them.
+        let mut res = MemoryReservation::new(&ctx.memory_pool, "HashJoinBuild(table)");
+        res.try_grow(table.memory_size().saturating_sub(collected))?;
+        let total = collected + res.size();
+        self.inner.metrics.update_peak_memory(total);
+        self.inner.metrics.set_extra("build_rows", table.batch.num_rows().to_string());
+        self.inner
+            .reservations
+            .lock()
+            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?
+            .push(res);
         self.inner
             .table
             .set(table)
@@ -181,16 +209,28 @@ fn empty_batch(num_columns: usize) -> Batch {
 
 impl LocalSink for BuildLocal {
     fn sink(&mut self, batch: Batch) -> Result<()> {
-        self.batches.push(batch.compact());
+        let b = batch.compact();
+        self.reservation.try_grow(b.memory_size())?;
+        self.batches.push(b);
         Ok(())
     }
 
     fn combine(self: Box<Self>) -> Result<()> {
-        self.inner
+        let BuildLocal {
+            inner,
+            batches,
+            reservation,
+        } = *self;
+        inner
             .batches
             .lock()
             .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?
-            .extend(self.batches);
+            .extend(batches);
+        inner
+            .reservations
+            .lock()
+            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?
+            .push(reservation);
         Ok(())
     }
 }

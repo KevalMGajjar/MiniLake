@@ -3,7 +3,11 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use std::sync::Arc;
+
 use minilake_core::DEFAULT_BATCH_SIZE;
+
+use crate::memory::MemoryPool;
 
 /// Knobs that control execution.
 #[derive(Clone, Debug)]
@@ -34,6 +38,8 @@ impl Default for ExecConfig {
 pub struct TaskContext {
     /// Settings.
     pub config: ExecConfig,
+    /// Query-wide memory budget.
+    pub memory_pool: Arc<MemoryPool>,
     /// Set when any worker fails (or a LIMIT is satisfied); workers stop
     /// pulling new morsels once they see it.
     cancelled: AtomicBool,
@@ -43,6 +49,7 @@ impl TaskContext {
     /// New context for one query.
     pub fn new(config: ExecConfig) -> Self {
         TaskContext {
+            memory_pool: MemoryPool::new(config.memory_limit),
             config,
             cancelled: AtomicBool::new(false),
         }

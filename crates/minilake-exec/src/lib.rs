@@ -11,6 +11,7 @@ pub mod context;
 pub mod executor;
 pub mod expr;
 pub mod kernels;
+pub mod memory;
 pub mod metrics;
 pub mod operators;
 pub mod pipeline;

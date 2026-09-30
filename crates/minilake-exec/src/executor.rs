@@ -161,6 +161,7 @@ impl PipelineBuilder {
                         key_types,
                         aggregates.clone(),
                         *mode,
+                        m.clone(),
                     ));
                     let output = sink.output();
                     self.close(p, sink, m.clone());
@@ -169,7 +170,7 @@ impl PipelineBuilder {
             }
             PhysicalPlan::Sort { input, keys, limit } => {
                 let p = self.build(input)?;
-                let sink = Arc::new(SortSink::new(keys.clone(), *limit));
+                let sink = Arc::new(SortSink::new(keys.clone(), *limit, m.clone()));
                 let output = sink.output();
                 let label = sink.name();
                 self.close(p, sink, m.clone());
@@ -191,13 +192,14 @@ impl PipelineBuilder {
                     .iter()
                     .map(|k| k.data_type(&build.schema()))
                     .collect::<Result<Vec<_>>>()?;
+                let build_metrics = self.build_metrics_for(plan);
                 let sink = Arc::new(JoinBuildSink::new(
                     build_keys.clone(),
                     key_types.clone(),
                     build.schema().len(),
+                    build_metrics.clone(),
                 ));
                 let table = sink.table();
-                let build_metrics = self.build_metrics_for(plan);
                 self.close(b, sink, build_metrics);
                 let mut p = self.build(probe)?;
                 p.operators.push((
@@ -303,6 +305,6 @@ pub fn execute(plan: &PhysicalPlan, config: ExecConfig) -> Result<QueryResult> {
         metrics: builder.metrics,
         pipeline_times,
         elapsed: start.elapsed(),
-        peak_memory: 0,
+        peak_memory: ctx.memory_pool.peak(),
     })
 }

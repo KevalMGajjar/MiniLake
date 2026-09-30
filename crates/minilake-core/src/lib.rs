@@ -17,6 +17,7 @@ pub mod column;
 pub mod date;
 pub mod display;
 pub mod error;
+pub mod ipc;
 pub mod scalar;
 pub mod schema;
 pub mod types;

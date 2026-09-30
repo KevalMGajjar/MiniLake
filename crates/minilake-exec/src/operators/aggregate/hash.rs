@@ -13,9 +13,14 @@
 //! (`keys ++ accumulator states` as ordinary batches), the same path used by
 //! spilling and by distributed workers.
 
+use std::io::{BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use minilake_core::ipc::{read_batch, write_batch};
 use minilake_core::{Batch, Column, DataType, MiniLakeError, Result};
+use tempfile::NamedTempFile;
 use minilake_hashtable::{KeyStore, SwissTable};
 
 use super::group_keys::GroupKeys;
@@ -23,6 +28,8 @@ use super::{batch_rows, Accumulator, AggMode, AggregateExpr, Rows};
 use crate::context::TaskContext;
 use crate::expr::{evaluate_to_column, PhysicalExpr};
 use crate::kernels::hash::hash_columns;
+use crate::memory::{MemoryPool, MemoryReservation};
+use crate::metrics::OperatorMetrics;
 use crate::pipeline::{BatchBuffer, LocalSink, Sink};
 
 /// Adapter letting the hash table compare/insert keys stored in [`GroupKeys`].
@@ -176,16 +183,96 @@ pub fn split(batch: Batch, batch_size: usize) -> Vec<Batch> {
         .collect()
 }
 
+/// Number of hash partitions used when spilling.
+pub const SPILL_PARTITIONS: usize = 16;
+
+/// Partition of a key hash for spilling. Uses bits 32..36, which are
+/// independent of the bits the hash table uses (low bits pick the group,
+/// the top 7 bits are the tag), so each partition's table still sees
+/// well-distributed hashes.
+#[inline]
+fn spill_partition(h: u64) -> usize {
+    ((h >> 32) as usize) & (SPILL_PARTITIONS - 1)
+}
+
+struct Global {
+    state: Option<HashAggState>,
+    reservation: Option<MemoryReservation>,
+}
+
 struct Inner {
     group_exprs: Vec<PhysicalExpr>,
     aggs: Vec<AggregateExpr>,
     key_types: Vec<DataType>,
     mode: AggMode,
-    global: Mutex<Option<HashAggState>>,
+    global: Mutex<Global>,
+    /// Spill files per partition (deleted automatically when dropped).
+    spill_files: Mutex<Vec<Vec<NamedTempFile>>>,
+    spilled: AtomicBool,
     output: Arc<BatchBuffer>,
+    metrics: Arc<OperatorMetrics>,
 }
 
-/// GROUP BY pipeline breaker.
+impl Inner {
+    fn lock_global(&self) -> Result<std::sync::MutexGuard<'_, Global>> {
+        self.global
+            .lock()
+            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))
+    }
+
+    /// Write `state`'s groups into the partition files and mark the
+    /// aggregate as spilled.
+    fn spill(&self, state: &HashAggState, dir: &Path) -> Result<()> {
+        if state.num_groups() == 0 {
+            return Ok(());
+        }
+        let batch = state.partial_batch()?;
+        let nk = self.key_types.len();
+        let mut hashes = Vec::new();
+        hash_columns(&batch.columns()[..nk], Rows::All(batch.num_rows()), &mut hashes);
+        let mut parts: Vec<Vec<u32>> = vec![Vec::new(); SPILL_PARTITIONS];
+        for (r, &h) in hashes.iter().enumerate() {
+            parts[spill_partition(h)].push(r as u32);
+        }
+        let mut files = self
+            .spill_files
+            .lock()
+            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?;
+        if files.is_empty() {
+            files.resize_with(SPILL_PARTITIONS, Vec::new);
+        }
+        let mut written = 0usize;
+        for (p, rows) in parts.iter().enumerate() {
+            if rows.is_empty() {
+                continue;
+            }
+            let part = Batch::try_new(
+                batch.columns().iter().map(|c| Arc::new(c.gather(rows))).collect(),
+                rows.len(),
+            )?;
+            let mut file = tempfile::Builder::new()
+                .prefix("minilake-spill-")
+                .tempfile_in(dir)?;
+            {
+                let mut w = BufWriter::new(file.as_file_mut());
+                write_batch(&mut w, &part)?;
+                w.flush()?;
+            }
+            written += part.memory_size();
+            files[p].push(file);
+        }
+        self.spilled.store(true, Ordering::Release);
+        let n_files: usize = files.iter().map(|f| f.len()).sum();
+        self.metrics.set_extra("spill_files", n_files.to_string());
+        self.metrics.set_extra(
+            "spilled_bytes_last",
+            crate::metrics::format_bytes(written),
+        );
+        Ok(())
+    }
+}
+
+/// GROUP BY pipeline breaker, with memory accounting and optional spilling.
 pub struct HashAggregateSink {
     inner: Arc<Inner>,
 }
@@ -197,6 +284,7 @@ impl HashAggregateSink {
         key_types: Vec<DataType>,
         aggs: Vec<AggregateExpr>,
         mode: AggMode,
+        metrics: Arc<OperatorMetrics>,
     ) -> Self {
         HashAggregateSink {
             inner: Arc::new(Inner {
@@ -204,8 +292,14 @@ impl HashAggregateSink {
                 aggs,
                 key_types,
                 mode,
-                global: Mutex::new(None),
+                global: Mutex::new(Global {
+                    state: None,
+                    reservation: None,
+                }),
+                spill_files: Mutex::new(Vec::new()),
+                spilled: AtomicBool::new(false),
                 output: BatchBuffer::new(),
+                metrics,
             }),
         }
     }
@@ -219,6 +313,31 @@ impl HashAggregateSink {
 struct HashAggLocal {
     inner: Arc<Inner>,
     state: HashAggState,
+    reservation: MemoryReservation,
+    spill_dir: Option<PathBuf>,
+    pool: Arc<MemoryPool>,
+}
+
+impl HashAggLocal {
+    /// Re-account the state size; on refusal spill (if enabled) or fail.
+    fn account(&mut self) -> Result<()> {
+        let need = self.state.memory_size();
+        match self.reservation.try_resize(need) {
+            Ok(()) => {
+                self.inner.metrics.update_peak_memory(self.reservation.size());
+                Ok(())
+            }
+            Err(e) => match &self.spill_dir {
+                Some(dir) => {
+                    self.inner.spill(&self.state, dir)?;
+                    self.state = HashAggState::new(&self.inner.key_types, &self.inner.aggs)?;
+                    self.reservation.free();
+                    Ok(())
+                }
+                None => Err(e),
+            },
+        }
+    }
 }
 
 impl Sink for HashAggregateSink {
@@ -226,28 +345,70 @@ impl Sink for HashAggregateSink {
         "HashAggregate".into()
     }
 
-    fn create_local(&self, _ctx: &TaskContext) -> Result<Box<dyn LocalSink>> {
+    fn create_local(&self, ctx: &TaskContext) -> Result<Box<dyn LocalSink>> {
         Ok(Box::new(HashAggLocal {
             state: HashAggState::new(&self.inner.key_types, &self.inner.aggs)?,
             inner: self.inner.clone(),
+            reservation: MemoryReservation::new(&ctx.memory_pool, "HashAggregate"),
+            spill_dir: ctx.config.spill_dir.clone(),
+            pool: ctx.memory_pool.clone(),
         }))
     }
 
     fn finalize(&self, ctx: &TaskContext) -> Result<()> {
-        let global = self
-            .inner
-            .global
-            .lock()
-            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?
-            .take();
-        let batches = match global {
-            None => Vec::new(),
-            Some(state) if self.inner.mode == AggMode::Partial => {
-                split(state.partial_batch()?, ctx.config.batch_size)
-            }
-            Some(state) => state.final_batches(ctx.config.batch_size)?,
+        let inner = &self.inner;
+        let (global_state, global_res) = {
+            let mut g = inner.lock_global()?;
+            (g.state.take(), g.reservation.take())
         };
-        self.inner.output.set(batches);
+        let emit = |state: &HashAggState| -> Result<Vec<Batch>> {
+            if inner.mode == AggMode::Partial {
+                Ok(split(state.partial_batch()?, ctx.config.batch_size))
+            } else {
+                state.final_batches(ctx.config.batch_size)
+            }
+        };
+        if !inner.spilled.load(Ordering::Acquire) {
+            let out = match &global_state {
+                Some(s) => emit(s)?,
+                None => Vec::new(),
+            };
+            inner.output.set(out);
+            return Ok(());
+        }
+        // Spilled: flush the in-memory global state too, then merge one
+        // partition at a time so only ~1/16 of the groups is in memory.
+        let dir = ctx
+            .config
+            .spill_dir
+            .clone()
+            .ok_or_else(|| MiniLakeError::Internal("spilled without spill dir".into()))?;
+        if let Some(s) = &global_state {
+            inner.spill(s, &dir)?;
+        }
+        drop(global_state);
+        drop(global_res);
+        let files = std::mem::take(
+            &mut *inner
+                .spill_files
+                .lock()
+                .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?,
+        );
+        let mut out = Vec::new();
+        for part in &files {
+            let mut state = HashAggState::new(&inner.key_types, &inner.aggs)?;
+            let mut res = MemoryReservation::new(&ctx.memory_pool, "HashAggregate(merge spilled partition)");
+            for f in part {
+                let mut r = BufReader::new(f.reopen()?);
+                while let Some(b) = read_batch(&mut r)? {
+                    state.merge_partial(&b)?;
+                    res.try_resize(state.memory_size())?;
+                }
+            }
+            inner.metrics.update_peak_memory(res.size());
+            out.extend(emit(&state)?);
+        }
+        inner.output.set(out);
         Ok(())
     }
 }
@@ -255,23 +416,57 @@ impl Sink for HashAggregateSink {
 impl LocalSink for HashAggLocal {
     fn sink(&mut self, batch: Batch) -> Result<()> {
         if self.inner.mode == AggMode::Final {
-            self.state.merge_partial(&batch)
+            self.state.merge_partial(&batch)?;
         } else {
             self.state
-                .update(&batch, &self.inner.group_exprs, &self.inner.aggs)
+                .update(&batch, &self.inner.group_exprs, &self.inner.aggs)?;
         }
+        self.account()
     }
 
-    fn combine(self: Box<Self>) -> Result<()> {
-        let mut g = self
-            .inner
-            .global
-            .lock()
-            .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?;
-        match g.as_mut() {
-            None => *g = Some(self.state),
-            Some(global) => global.merge_state(&self.state)?,
+    fn combine(mut self: Box<Self>) -> Result<()> {
+        if self.inner.spilled.load(Ordering::Acquire) {
+            // Once anything is on disk, everything goes to disk: partitions
+            // are merged in `finalize`.
+            if let Some(dir) = self.spill_dir.clone() {
+                self.inner.spill(&self.state, &dir)?;
+                return Ok(());
+            }
         }
-        Ok(())
+        let inner = self.inner.clone();
+        let mut guard = inner.lock_global()?;
+        // Reborrow through the guard once so the two fields can be borrowed
+        // independently below.
+        let g: &mut Global = &mut guard;
+        let state = std::mem::replace(
+            &mut self.state,
+            HashAggState::new(&inner.key_types, &inner.aggs)?,
+        );
+        match g.state.as_mut() {
+            None => g.state = Some(state),
+            Some(global) => global.merge_state(&state)?,
+        }
+        // The local state now lives in the global one.
+        self.reservation.free();
+        let size = g.state.as_ref().map_or(0, |s| s.memory_size());
+        let res = g
+            .reservation
+            .get_or_insert_with(|| MemoryReservation::new(&self.pool, "HashAggregate(global)"));
+        match res.try_resize(size) {
+            Ok(()) => {
+                inner.metrics.update_peak_memory(res.size());
+                Ok(())
+            }
+            Err(e) => match &self.spill_dir {
+                Some(dir) => {
+                    if let Some(s) = g.state.take() {
+                        inner.spill(&s, dir)?;
+                    }
+                    res.free();
+                    Ok(())
+                }
+                None => Err(e),
+            },
+        }
     }
 }
