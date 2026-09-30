@@ -1,0 +1,8 @@
+/target
+/data
+/results
+*.svg
+perf.data*
+__pycache__/
+.venv/
+spill-*/

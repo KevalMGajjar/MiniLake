@@ -1,0 +1,21 @@
+[package]
+name = "minilake-hashtable"
+description = "SwissTable-style and chaining hash tables for MiniLake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "hashtable"
+harness = false

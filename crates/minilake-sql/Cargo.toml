@@ -1,0 +1,17 @@
+[package]
+name = "minilake-sql"
+description = "SQL frontend, logical plan and optimizer for MiniLake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+minilake-core.workspace = true
+minilake-storage.workspace = true
+minilake-exec.workspace = true
+sqlparser.workspace = true

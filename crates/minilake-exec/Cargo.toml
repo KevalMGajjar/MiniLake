@@ -1,0 +1,29 @@
+[package]
+name = "minilake-exec"
+description = "Vectorized, morsel-driven execution engine for MiniLake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+minilake-core.workspace = true
+minilake-hashtable.workspace = true
+minilake-storage.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "kernels"
+harness = false
+
+[[bench]]
+name = "scheduler"
+harness = false

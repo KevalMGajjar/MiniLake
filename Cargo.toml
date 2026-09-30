@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/minilake-core",
+    "crates/minilake-hashtable",
+    "crates/minilake-storage",
+    "crates/minilake-exec",
+    "crates/minilake-sql",
+    "crates/minilake-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Keval Gajjar"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+minilake-core = { path = "crates/minilake-core" }
+minilake-hashtable = { path = "crates/minilake-hashtable" }
+minilake-storage = { path = "crates/minilake-storage" }
+minilake-exec = { path = "crates/minilake-exec" }
+minilake-sql = { path = "crates/minilake-sql" }
+
+# Parquet is used ONLY to decode pages into our own column types. Default
+# features are disabled so the Arrow crates are not pulled in at all.
+parquet = { version = "60", default-features = false, features = ["snap"] }
+sqlparser = "0.63"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+criterion = "0.8"
+proptest = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Kernels index slices in tight loops on purpose; everything else is default.
+needless_range_loop = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[profile.release]
+debug = 1          # keep symbols for perf/flamegraph
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+debug = 1
+lto = "thin"
+codegen-units = 1
