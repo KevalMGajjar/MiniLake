@@ -600,7 +600,9 @@ dependencies = [
  "minilake-core",
  "minilake-exec",
  "minilake-storage",
+ "parquet",
  "sqlparser",
+ "tempfile",
 ]
 
 [[package]]

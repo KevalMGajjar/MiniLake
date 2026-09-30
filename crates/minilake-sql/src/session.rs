@@ -113,10 +113,22 @@ impl Session {
 /// Render a physical plan annotated with runtime metrics.
 pub fn explain_analyze(plan: &PhysicalPlan, result: &QueryResult) -> String {
     let tree = plan.display_tree(&|node| {
-        result
-            .metrics
-            .get(&node.node_id())
-            .map(|m| m.summary())
+        let main = result.metrics.get(&node.node_id()).map(|m| m.summary());
+        match node {
+            // Joins have two halves: the build sink and the probe operator.
+            PhysicalPlan::HashJoin { .. } => {
+                let build = result
+                    .metrics
+                    .get(&(node.node_id() + 1))
+                    .map(|m| m.summary())
+                    .unwrap_or_default();
+                Some(format!(
+                    "probe: {} | build: {build}",
+                    main.unwrap_or_default()
+                ))
+            }
+            _ => main,
+        }
     });
     let mut out = format!("== Physical plan with metrics ==\n{tree}\n== Pipelines ==\n");
     for (i, (desc, t)) in result.pipeline_times.iter().enumerate() {

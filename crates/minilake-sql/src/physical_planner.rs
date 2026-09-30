@@ -8,10 +8,11 @@
 use std::sync::Arc;
 
 use minilake_core::{DataType, MiniLakeError, Result, ScalarValue};
-use minilake_exec::expr::{LikePattern, PhysicalExpr};
+use minilake_exec::expr::{BinaryOp, LikePattern, PhysicalExpr};
 use minilake_exec::operators::aggregate::{AggMode, AggregateExpr, AggregateFunction};
 use minilake_exec::operators::sort::SortKey;
 use minilake_exec::plan::{PhysicalPlan, ScanNode};
+use minilake_storage::{PruneOp, PrunePredicate};
 
 use crate::logical::{AggFunc, Expr, LogicalPlan, LogicalSchema};
 
@@ -32,11 +33,12 @@ pub fn create_physical_plan(plan: &LogicalPlan) -> Result<PhysicalPlan> {
                 Some(f) => Some(to_physical_expr(&f, schema)?),
                 None => None,
             };
+            let prune_predicates = prune_predicates(filters, schema, &projection);
             PhysicalPlan::Scan(ScanNode {
                 table: table.clone(),
+                row_groups: table.prune(&prune_predicates),
                 projection,
-                row_groups: (0..table.row_groups().len()).collect(),
-                prune_predicates: Vec::new(),
+                prune_predicates,
                 filter,
                 schema: Arc::new(schema.to_schema()),
             })
@@ -175,6 +177,55 @@ pub fn create_physical_plan(plan: &LogicalPlan) -> Result<PhysicalPlan> {
     })
 }
 
+/// Extract `column <op> literal` conjuncts usable for row-group pruning.
+///
+/// `schema` is the scan's (projected) schema and `projection` maps its
+/// columns back to table column indices, which is what statistics use.
+pub fn prune_predicates(
+    filters: &[Expr],
+    schema: &LogicalSchema,
+    projection: &[usize],
+) -> Vec<PrunePredicate> {
+    let mut out = Vec::new();
+    for f in filters {
+        let mut conj = Vec::new();
+        f.clone().split_conjunction(&mut conj);
+        for c in conj {
+            let Expr::Binary { op, left, right } = &c else {
+                continue;
+            };
+            let (col, lit, op) = match (left.as_ref(), right.as_ref()) {
+                (Expr::Column(col), Expr::Literal(v)) => (col, v, *op),
+                (Expr::Literal(v), Expr::Column(col)) => (col, v, op.flip()),
+                _ => continue,
+            };
+            let op = match op {
+                BinaryOp::Eq => PruneOp::Eq,
+                BinaryOp::Lt => PruneOp::Lt,
+                BinaryOp::LtEq => PruneOp::LtEq,
+                BinaryOp::Gt => PruneOp::Gt,
+                BinaryOp::GtEq => PruneOp::GtEq,
+                _ => continue,
+            };
+            let Ok(idx) = schema.resolve(col) else {
+                continue;
+            };
+            let Ok(value) = runtime_literal(lit).cast_to(schema.field(idx).data_type) else {
+                continue;
+            };
+            if value.is_null() {
+                continue;
+            }
+            out.push(PrunePredicate {
+                column: projection[idx],
+                op,
+                value,
+            });
+        }
+    }
+    out
+}
+
 fn cast(e: PhysicalExpr, from: DataType, to: DataType) -> PhysicalExpr {
     if from == to {
         e
@@ -196,8 +247,27 @@ fn cast(e: PhysicalExpr, from: DataType, to: DataType) -> PhysicalExpr {
 /// These are textbook default selectivities, not statistics; see DESIGN.md.
 pub fn estimate_rows(plan: &LogicalPlan) -> f64 {
     match plan {
-        LogicalPlan::Scan { table, filters, .. } => {
-            (table.num_rows() as f64 * 0.5f64.powi(filters.len() as i32)).max(1.0)
+        LogicalPlan::Scan {
+            table,
+            filters,
+            schema,
+            projection,
+            ..
+        } => {
+            // Rows in row groups that survive min/max pruning.
+            let proj: Vec<usize> = projection
+                .clone()
+                .unwrap_or_else(|| (0..schema.fields.len()).collect());
+            let rows: usize = table
+                .prune(&prune_predicates(filters, schema, &proj))
+                .iter()
+                .map(|&i| table.row_groups()[i].num_rows)
+                .sum();
+            let mut conj = Vec::new();
+            for f in filters {
+                f.clone().split_conjunction(&mut conj);
+            }
+            (rows as f64 * 0.5f64.powi(conj.len() as i32)).max(1.0)
         }
         LogicalPlan::Filter { input, predicate } => {
             let mut conj = Vec::new();
