@@ -560,6 +560,7 @@ dependencies = [
  "anyhow",
  "clap",
  "minilake-core",
+ "minilake-dist",
  "minilake-exec",
  "minilake-sql",
  "minilake-storage",
@@ -571,6 +572,18 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "thiserror",
+]
+
+[[package]]
+name = "minilake-dist"
+version = "0.1.0"
+dependencies = [
+ "minilake-core",
+ "minilake-exec",
+ "minilake-sql",
+ "minilake-storage",
+ "parquet",
+ "tempfile",
 ]
 
 [[package]]

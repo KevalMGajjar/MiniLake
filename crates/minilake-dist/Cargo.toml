@@ -1,6 +1,6 @@
 [package]
-name = "minilake-cli"
-description = "MiniLake command line interface"
+name = "minilake-dist"
+description = "Scatter-gather distributed execution for MiniLake"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,15 +10,12 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
-[[bin]]
-name = "minilake"
-path = "src/main.rs"
-
 [dependencies]
 minilake-core.workspace = true
 minilake-storage.workspace = true
 minilake-exec.workspace = true
 minilake-sql.workspace = true
-minilake-dist.workspace = true
-clap.workspace = true
-anyhow.workspace = true
+
+[dev-dependencies]
+parquet.workspace = true
+tempfile.workspace = true

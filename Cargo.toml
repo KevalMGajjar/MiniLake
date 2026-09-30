@@ -6,6 +6,7 @@ members = [
     "crates/minilake-storage",
     "crates/minilake-exec",
     "crates/minilake-sql",
+    "crates/minilake-dist",
     "crates/minilake-cli",
 ]
 
@@ -22,6 +23,7 @@ minilake-hashtable = { path = "crates/minilake-hashtable" }
 minilake-storage = { path = "crates/minilake-storage" }
 minilake-exec = { path = "crates/minilake-exec" }
 minilake-sql = { path = "crates/minilake-sql" }
+minilake-dist = { path = "crates/minilake-dist" }
 
 # Parquet is used ONLY to decode pages into our own column types. Default
 # features are disabled so the Arrow crates are not pulled in at all.

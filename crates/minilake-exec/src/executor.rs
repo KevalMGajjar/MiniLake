@@ -214,6 +214,15 @@ impl PipelineBuilder {
                 ));
                 Ok(p)
             }
+            PhysicalPlan::Values { batches, label, .. } => {
+                let buffer = BatchBuffer::new();
+                buffer.set(batches.clone());
+                Ok(OpenPipeline {
+                    source: Arc::new(BufferSource::new(buffer, label.clone())),
+                    source_metrics: m,
+                    operators: Vec::new(),
+                })
+            }
             PhysicalPlan::Limit {
                 input,
                 limit,

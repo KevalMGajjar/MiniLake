@@ -5,6 +5,8 @@
 //! minilake query --file queries/tpch/q1.sql --data ./data/sf1 --format csv
 //! minilake bench --file queries/tpch/q1.sql --data ./data/sf1 --threads 8 --runs 5
 //! minilake repl --data ./data/sf1
+//! minilake worker --listen 127.0.0.1:7001 --data ./data/sf1
+//! minilake coordinator --file queries/tpch/q1.sql --workers 127.0.0.1:7001,127.0.0.1:7002
 //! ```
 
 use std::io::{BufRead, Write};
@@ -59,6 +61,31 @@ enum Command {
     },
     /// Interactive shell (statements end with ';').
     Repl {
+        #[command(flatten)]
+        opts: EngineOpts,
+    },
+    /// Run a distributed worker (serves partial aggregations over TCP).
+    Worker {
+        /// Address to listen on.
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        listen: String,
+        /// Directory containing <table>/*.parquet.
+        #[arg(long, default_value = "data/sf1")]
+        data: PathBuf,
+    },
+    /// Run a query across workers (scatter-gather).
+    Coordinator {
+        /// SQL text (or use --file).
+        sql: Option<String>,
+        /// Read the SQL from a file.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Comma-separated worker addresses.
+        #[arg(long, value_delimiter = ',', required = true)]
+        workers: Vec<String>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Table)]
+        format: Format,
         #[command(flatten)]
         opts: EngineOpts,
     },
@@ -244,6 +271,36 @@ fn main() -> Result<()> {
             run_bench(&session, sql.trim().trim_end_matches(';'), runs, json)?;
         }
         Command::Repl { opts } => repl(&opts.session()?)?,
+        Command::Worker { listen, data } => minilake_dist::worker::serve(&listen, data)?,
+        Command::Coordinator {
+            sql,
+            file,
+            workers,
+            format,
+            opts,
+        } => {
+            let sql = read_sql(sql, file)?;
+            let session = opts.session()?;
+            let (result, stats) = minilake_dist::coordinator::run(
+                sql.trim().trim_end_matches(';'),
+                &workers,
+                session.catalog.clone(),
+                session.config.clone(),
+            )?;
+            eprintln!("partitioned table: {}", stats.partitioned_table);
+            for (addr, files, t) in &stats.workers {
+                eprintln!(
+                    "  worker {addr}: files {files:?} in {:.1} ms",
+                    t.as_secs_f64() * 1e3
+                );
+            }
+            eprintln!(
+                "  final merge: {:.1} ms, total: {:.1} ms",
+                stats.merge.as_secs_f64() * 1e3,
+                stats.total.as_secs_f64() * 1e3
+            );
+            print_output(Output::Rows(result), format);
+        }
     }
     Ok(())
 }

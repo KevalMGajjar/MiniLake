@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use minilake_core::{DataType, Field, Schema, SchemaRef};
+use minilake_core::{Batch, DataType, Field, Schema, SchemaRef};
 use minilake_storage::{PrunePredicate, Table};
 
 use crate::expr::PhysicalExpr;
@@ -94,6 +94,15 @@ pub enum PhysicalPlan {
         /// rows to skip
         offset: usize,
     },
+    /// Pre-computed batches (e.g. partial aggregates received from workers).
+    Values {
+        /// the rows
+        batches: Vec<Batch>,
+        /// their schema
+        schema: SchemaRef,
+        /// shown in EXPLAIN
+        label: String,
+    },
 }
 
 impl PhysicalPlan {
@@ -104,7 +113,9 @@ impl PhysicalPlan {
             PhysicalPlan::Filter { input, .. }
             | PhysicalPlan::Sort { input, .. }
             | PhysicalPlan::Limit { input, .. } => input.schema(),
-            PhysicalPlan::HashJoin { schema, .. } => schema.clone(),
+            PhysicalPlan::HashJoin { schema, .. } | PhysicalPlan::Values { schema, .. } => {
+                schema.clone()
+            }
             PhysicalPlan::Projection { schema, .. } | PhysicalPlan::Aggregate { schema, .. } => {
                 schema.clone()
             }
@@ -114,7 +125,7 @@ impl PhysicalPlan {
     /// Children, in display order.
     pub fn children(&self) -> Vec<&PhysicalPlan> {
         match self {
-            PhysicalPlan::Scan(_) => vec![],
+            PhysicalPlan::Scan(_) | PhysicalPlan::Values { .. } => vec![],
             PhysicalPlan::Filter { input, .. }
             | PhysicalPlan::Projection { input, .. }
             | PhysicalPlan::Aggregate { input, .. }
@@ -219,6 +230,10 @@ impl PhysicalPlan {
             }
             PhysicalPlan::Limit { limit, offset, .. } => {
                 format!("Limit: {limit} offset={offset}")
+            }
+            PhysicalPlan::Values { batches, label, .. } => {
+                let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+                format!("Values: {label} ({} batches, {rows} rows)", batches.len())
             }
         }
     }
