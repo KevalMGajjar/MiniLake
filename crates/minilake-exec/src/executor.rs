@@ -28,6 +28,7 @@ use crate::operators::projection::ProjectionOperator;
 use crate::operators::scan::ScanSource;
 use crate::pipeline::{BatchBuffer, Operator, Pipeline, Sink, Source};
 use crate::plan::PhysicalPlan;
+use crate::scheduler::{run_parallel, AtomicMorselQueue, MorselQueue};
 
 /// Metrics for every plan node, keyed by [`PhysicalPlan::node_id`].
 pub type MetricsMap = HashMap<usize, Arc<OperatorMetrics>>;
@@ -246,16 +247,24 @@ impl PipelineBuilder {
     }
 }
 
-/// Run one pipeline to completion (single-threaded).
+/// Run one pipeline to completion with morsel-driven parallelism.
+///
+/// Workers = min(configured threads, number of morsels); pipelines whose
+/// source must be read in order (sorted data) run on one thread.
 pub fn run_pipeline(pipeline: &Pipeline, ctx: &TaskContext) -> Result<()> {
     ctx.reset_cancel();
     let n = pipeline.source.num_morsels();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let next_morsel = || {
-        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        (i < n).then_some(i)
+    let queue = AtomicMorselQueue::new(n);
+    let threads = if pipeline.source.preserves_order() {
+        1
+    } else {
+        ctx.config.threads.clamp(1, n.max(1))
     };
-    pipeline.run_worker(ctx, &next_morsel)?;
+    run_parallel(
+        threads,
+        |_worker| pipeline.run_worker(ctx, &|| queue.next()),
+        &|| ctx.cancel(),
+    )?;
     let t = Instant::now();
     pipeline.sink.finalize(ctx)?;
     pipeline.sink_metrics.add_time(t.elapsed());

@@ -15,6 +15,7 @@ pub mod metrics;
 pub mod operators;
 pub mod pipeline;
 pub mod plan;
+pub mod scheduler;
 
 pub use context::{ExecConfig, TaskContext};
 pub use executor::{execute, QueryResult};
