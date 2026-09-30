@@ -5,6 +5,8 @@
 //! * [`hash::HashAggregateSink`]: GROUP BY with the custom hash table.
 
 pub mod accumulator;
+pub mod group_keys;
+pub mod hash;
 pub mod ungrouped;
 
 use std::sync::Arc;

@@ -8,6 +8,7 @@ use minilake_storage::{PrunePredicate, Table};
 
 use crate::expr::PhysicalExpr;
 use crate::operators::aggregate::{AggMode, AggregateExpr};
+use crate::operators::sort::SortKey;
 
 /// Scan node.
 #[derive(Clone, Debug)]
@@ -60,6 +61,15 @@ pub enum PhysicalPlan {
         /// output schema: group keys, then aggregates (or their states)
         schema: SchemaRef,
     },
+    /// ORDER BY; with `limit` it is a top-N.
+    Sort {
+        /// input
+        input: Box<PhysicalPlan>,
+        /// keys
+        keys: Vec<SortKey>,
+        /// keep only the first `limit` rows (top-N)
+        limit: Option<usize>,
+    },
 }
 
 impl PhysicalPlan {
@@ -67,7 +77,7 @@ impl PhysicalPlan {
     pub fn schema(&self) -> SchemaRef {
         match self {
             PhysicalPlan::Scan(s) => s.schema.clone(),
-            PhysicalPlan::Filter { input, .. } => input.schema(),
+            PhysicalPlan::Filter { input, .. } | PhysicalPlan::Sort { input, .. } => input.schema(),
             PhysicalPlan::Projection { schema, .. } | PhysicalPlan::Aggregate { schema, .. } => {
                 schema.clone()
             }
@@ -80,7 +90,8 @@ impl PhysicalPlan {
             PhysicalPlan::Scan(_) => vec![],
             PhysicalPlan::Filter { input, .. }
             | PhysicalPlan::Projection { input, .. }
-            | PhysicalPlan::Aggregate { input, .. } => vec![input],
+            | PhysicalPlan::Aggregate { input, .. }
+            | PhysicalPlan::Sort { input, .. } => vec![input],
         }
     }
 
@@ -149,6 +160,16 @@ impl PhysicalPlan {
                     other => format!(" mode={other:?}"),
                 };
                 format!("{kind}:{m} group_by=[{}] aggs=[{}]", g.join(", "), a.join(", "))
+            }
+            PhysicalPlan::Sort { keys, limit, .. } => {
+                let k: Vec<String> = keys
+                    .iter()
+                    .map(|k| format!("{} {}", k.expr, if k.asc { "ASC" } else { "DESC" }))
+                    .collect();
+                match limit {
+                    Some(n) => format!("TopN: n={n} keys=[{}]", k.join(", ")),
+                    None => format!("Sort: [{}]", k.join(", ")),
+                }
             }
         }
     }

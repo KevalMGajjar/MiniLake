@@ -9,3 +9,4 @@ pub mod collect;
 pub mod filter;
 pub mod projection;
 pub mod scan;
+pub mod sort;

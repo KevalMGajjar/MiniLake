@@ -19,6 +19,7 @@ pub mod arith;
 pub mod boolean;
 pub mod cast;
 pub mod cmp;
+pub mod hash;
 pub mod scalar_ops;
 pub mod string;
 

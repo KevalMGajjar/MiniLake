@@ -17,7 +17,9 @@ use minilake_core::{Batch, Result, SchemaRef};
 
 use crate::context::{ExecConfig, TaskContext};
 use crate::metrics::OperatorMetrics;
+use crate::operators::aggregate::hash::HashAggregateSink;
 use crate::operators::aggregate::ungrouped::UngroupedAggregateSink;
+use crate::operators::sort::SortSink;
 use crate::operators::collect::{BufferSource, CollectSink};
 use crate::operators::filter::FilterOperator;
 use crate::operators::projection::ProjectionOperator;
@@ -132,7 +134,7 @@ impl PipelineBuilder {
                 group_exprs,
                 aggregates,
                 mode,
-                ..
+                schema,
             } => {
                 let p = self.build(input)?;
                 if group_exprs.is_empty() {
@@ -141,10 +143,28 @@ impl PipelineBuilder {
                     self.close(p, sink, m.clone());
                     Ok(self.replay(output, "UngroupedAggregate", m))
                 } else {
-                    Err(minilake_core::MiniLakeError::Unsupported(
-                        "GROUP BY (hash aggregate)".into(),
-                    ))
+                    let key_types = schema.fields[..group_exprs.len()]
+                        .iter()
+                        .map(|f| f.data_type)
+                        .collect();
+                    let sink = Arc::new(HashAggregateSink::new(
+                        group_exprs.clone(),
+                        key_types,
+                        aggregates.clone(),
+                        *mode,
+                    ));
+                    let output = sink.output();
+                    self.close(p, sink, m.clone());
+                    Ok(self.replay(output, "HashAggregate", m))
                 }
+            }
+            PhysicalPlan::Sort { input, keys, limit } => {
+                let p = self.build(input)?;
+                let sink = Arc::new(SortSink::new(keys.clone(), *limit));
+                let output = sink.output();
+                let label = sink.name();
+                self.close(p, sink, m.clone());
+                Ok(self.replay(output, &label, m))
             }
         }
     }

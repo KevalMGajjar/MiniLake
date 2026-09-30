@@ -10,6 +10,7 @@ use std::sync::Arc;
 use minilake_core::{MiniLakeError, Result, ScalarValue};
 use minilake_exec::expr::{LikePattern, PhysicalExpr};
 use minilake_exec::operators::aggregate::{AggMode, AggregateExpr, AggregateFunction};
+use minilake_exec::operators::sort::SortKey;
 use minilake_exec::plan::{PhysicalPlan, ScanNode};
 
 use crate::logical::{AggFunc, Expr, LogicalPlan, LogicalSchema};
@@ -77,6 +78,23 @@ pub fn create_physical_plan(plan: &LogicalPlan) -> Result<PhysicalPlan> {
                     .collect::<Result<_>>()?,
                 mode: AggMode::Single,
                 schema: Arc::new(schema.to_schema()),
+                input: Box::new(create_physical_plan(input)?),
+            }
+        }
+        LogicalPlan::Sort { input, keys } => {
+            let in_schema = input.schema();
+            PhysicalPlan::Sort {
+                keys: keys
+                    .iter()
+                    .map(|k| {
+                        Ok(SortKey {
+                            expr: to_physical_expr(&k.expr, &in_schema)?,
+                            asc: k.asc,
+                            nulls_first: k.nulls_first,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+                limit: None,
                 input: Box::new(create_physical_plan(input)?),
             }
         }
