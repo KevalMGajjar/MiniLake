@@ -4,6 +4,7 @@
 //! * Streaming operators: [`filter::FilterOperator`], [`projection::ProjectionOperator`]
 //! * Sinks (pipeline breakers): [`collect::CollectSink`]
 
+pub mod aggregate;
 pub mod collect;
 pub mod filter;
 pub mod projection;

@@ -7,6 +7,7 @@ use minilake_core::{DataType, Field, Schema, SchemaRef};
 use minilake_storage::{PrunePredicate, Table};
 
 use crate::expr::PhysicalExpr;
+use crate::operators::aggregate::{AggMode, AggregateExpr};
 
 /// Scan node.
 #[derive(Clone, Debug)]
@@ -46,6 +47,19 @@ pub enum PhysicalPlan {
         /// output schema
         schema: SchemaRef,
     },
+    /// GROUP BY + aggregates (no group exprs = ungrouped aggregate).
+    Aggregate {
+        /// input
+        input: Box<PhysicalPlan>,
+        /// group keys
+        group_exprs: Vec<PhysicalExpr>,
+        /// aggregates
+        aggregates: Vec<AggregateExpr>,
+        /// single / partial / final
+        mode: AggMode,
+        /// output schema: group keys, then aggregates (or their states)
+        schema: SchemaRef,
+    },
 }
 
 impl PhysicalPlan {
@@ -54,7 +68,9 @@ impl PhysicalPlan {
         match self {
             PhysicalPlan::Scan(s) => s.schema.clone(),
             PhysicalPlan::Filter { input, .. } => input.schema(),
-            PhysicalPlan::Projection { schema, .. } => schema.clone(),
+            PhysicalPlan::Projection { schema, .. } | PhysicalPlan::Aggregate { schema, .. } => {
+                schema.clone()
+            }
         }
     }
 
@@ -62,9 +78,9 @@ impl PhysicalPlan {
     pub fn children(&self) -> Vec<&PhysicalPlan> {
         match self {
             PhysicalPlan::Scan(_) => vec![],
-            PhysicalPlan::Filter { input, .. } | PhysicalPlan::Projection { input, .. } => {
-                vec![input]
-            }
+            PhysicalPlan::Filter { input, .. }
+            | PhysicalPlan::Projection { input, .. }
+            | PhysicalPlan::Aggregate { input, .. } => vec![input],
         }
     }
 
@@ -108,6 +124,31 @@ impl PhysicalPlan {
                     .map(|(e, f)| format!("{e} AS {}", f.name))
                     .collect();
                 format!("Projection: {}", items.join(", "))
+            }
+            PhysicalPlan::Aggregate {
+                group_exprs,
+                aggregates,
+                mode,
+                ..
+            } => {
+                let g: Vec<String> = group_exprs.iter().map(|e| e.to_string()).collect();
+                let a: Vec<String> = aggregates
+                    .iter()
+                    .map(|a| match &a.arg {
+                        Some(e) => format!("{}({e})", a.func.name()),
+                        None => "count(*)".to_string(),
+                    })
+                    .collect();
+                let kind = if group_exprs.is_empty() {
+                    "UngroupedAggregate"
+                } else {
+                    "HashAggregate"
+                };
+                let m = match mode {
+                    AggMode::Single => String::new(),
+                    other => format!(" mode={other:?}"),
+                };
+                format!("{kind}:{m} group_by=[{}] aggs=[{}]", g.join(", "), a.join(", "))
             }
         }
     }

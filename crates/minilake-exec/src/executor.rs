@@ -17,7 +17,8 @@ use minilake_core::{Batch, Result, SchemaRef};
 
 use crate::context::{ExecConfig, TaskContext};
 use crate::metrics::OperatorMetrics;
-use crate::operators::collect::CollectSink;
+use crate::operators::aggregate::ungrouped::UngroupedAggregateSink;
+use crate::operators::collect::{BufferSource, CollectSink};
 use crate::operators::filter::FilterOperator;
 use crate::operators::projection::ProjectionOperator;
 use crate::operators::scan::ScanSource;
@@ -39,6 +40,8 @@ pub struct QueryResult {
     pub pipeline_times: Vec<(String, Duration)>,
     /// Total wall-clock time.
     pub elapsed: Duration,
+    /// Peak bytes reserved from the memory pool.
+    pub peak_memory: usize,
 }
 
 impl QueryResult {
@@ -124,6 +127,39 @@ impl PipelineBuilder {
                 ));
                 Ok(p)
             }
+            PhysicalPlan::Aggregate {
+                input,
+                group_exprs,
+                aggregates,
+                mode,
+                ..
+            } => {
+                let p = self.build(input)?;
+                if group_exprs.is_empty() {
+                    let sink = Arc::new(UngroupedAggregateSink::new(aggregates.clone(), *mode));
+                    let output = sink.output();
+                    self.close(p, sink, m.clone());
+                    Ok(self.replay(output, "UngroupedAggregate", m))
+                } else {
+                    Err(minilake_core::MiniLakeError::Unsupported(
+                        "GROUP BY (hash aggregate)".into(),
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Open a new pipeline that replays a breaker's output.
+    pub fn replay(
+        &mut self,
+        buffer: Arc<BatchBuffer>,
+        label: &str,
+        metrics: Arc<OperatorMetrics>,
+    ) -> OpenPipeline {
+        OpenPipeline {
+            source: Arc::new(BufferSource::new(buffer, label)),
+            source_metrics: metrics,
+            operators: Vec::new(),
         }
     }
 }
@@ -176,5 +212,6 @@ pub fn execute(plan: &PhysicalPlan, config: ExecConfig) -> Result<QueryResult> {
         metrics: builder.metrics,
         pipeline_times,
         elapsed: start.elapsed(),
+        peak_memory: 0,
     })
 }
