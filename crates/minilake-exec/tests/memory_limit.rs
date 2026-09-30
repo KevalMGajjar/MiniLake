@@ -80,7 +80,11 @@ fn aggregate_spills_and_matches() {
     let mut a = s.create_local(&ctx).unwrap();
     let mut b = s.create_local(&ctx).unwrap();
     for (i, batch) in input().into_iter().enumerate() {
-        if i % 2 == 0 { a.sink(batch).unwrap() } else { b.sink(batch).unwrap() }
+        if i % 2 == 0 {
+            a.sink(batch).unwrap()
+        } else {
+            b.sink(batch).unwrap()
+        }
     }
     a.combine().unwrap();
     b.combine().unwrap();

@@ -22,7 +22,11 @@ use minilake_sql::{Output, Session};
 use minilake_storage::Catalog;
 
 #[derive(Parser)]
-#[command(name = "minilake", version, about = "A vectorized, multi-threaded columnar SQL engine")]
+#[command(
+    name = "minilake",
+    version,
+    about = "A vectorized, multi-threaded columnar SQL engine"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -222,7 +226,14 @@ fn repl(session: &Session) -> Result<()> {
     let stdin = std::io::stdin();
     let mut buf = String::new();
     loop {
-        print!("{}", if buf.is_empty() { "minilake> " } else { "      ... " });
+        print!(
+            "{}",
+            if buf.is_empty() {
+                "minilake> "
+            } else {
+                "      ... "
+            }
+        );
         std::io::stdout().flush()?;
         let mut line = String::new();
         if stdin.lock().read_line(&mut line)? == 0 {

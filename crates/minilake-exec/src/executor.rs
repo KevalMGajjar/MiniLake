@@ -19,13 +19,13 @@ use crate::context::{ExecConfig, TaskContext};
 use crate::metrics::OperatorMetrics;
 use crate::operators::aggregate::hash::HashAggregateSink;
 use crate::operators::aggregate::ungrouped::UngroupedAggregateSink;
-use crate::operators::join::{HashJoinProbe, JoinBuildSink};
-use crate::operators::limit::LimitSink;
-use crate::operators::sort::SortSink;
 use crate::operators::collect::{BufferSource, CollectSink};
 use crate::operators::filter::FilterOperator;
+use crate::operators::join::{HashJoinProbe, JoinBuildSink};
+use crate::operators::limit::LimitSink;
 use crate::operators::projection::ProjectionOperator;
 use crate::operators::scan::ScanSource;
+use crate::operators::sort::SortSink;
 use crate::pipeline::{BatchBuffer, Operator, Pipeline, Sink, Source};
 use crate::plan::PhysicalPlan;
 use crate::scheduler::{run_parallel, AtomicMorselQueue, MorselQueue};
@@ -82,7 +82,12 @@ impl PipelineBuilder {
     }
 
     /// Close `open` with `sink`.
-    pub fn close(&mut self, open: OpenPipeline, sink: Arc<dyn Sink>, sink_metrics: Arc<OperatorMetrics>) {
+    pub fn close(
+        &mut self,
+        open: OpenPipeline,
+        sink: Arc<dyn Sink>,
+        sink_metrics: Arc<OperatorMetrics>,
+    ) {
         self.pipelines.push(Pipeline {
             source: open.source,
             source_metrics: open.source_metrics,

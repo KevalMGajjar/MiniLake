@@ -30,9 +30,9 @@ pub fn scalar_binary(op: BinaryOp, l: &ScalarValue, r: &ScalarValue) -> Result<S
         return Ok(S::Null);
     }
     if op.is_comparison() {
-        let ord = l.compare(r).ok_or_else(|| {
-            MiniLakeError::Plan(format!("cannot compare {l:?} with {r:?}"))
-        })?;
+        let ord = l
+            .compare(r)
+            .ok_or_else(|| MiniLakeError::Plan(format!("cannot compare {l:?} with {r:?}")))?;
         let b = match op {
             BinaryOp::Eq => ord == Ordering::Equal,
             BinaryOp::NotEq => ord != Ordering::Equal,
@@ -60,7 +60,8 @@ pub fn scalar_binary(op: BinaryOp, l: &ScalarValue, r: &ScalarValue) -> Result<S
             };
             Ok(S::Decimal(v.ok_or_else(overflow)?, scale))
         }
-        (S::Decimal(..), S::Int32(_) | S::Int64(_)) | (S::Int32(_) | S::Int64(_), S::Decimal(..))
+        (S::Decimal(..), S::Int32(_) | S::Int64(_))
+        | (S::Int32(_) | S::Int64(_), S::Decimal(..))
             if op != BinaryOp::Div && op != BinaryOp::Mod =>
         {
             let to_dec = |v: &ScalarValue| match v {
@@ -73,7 +74,11 @@ pub fn scalar_binary(op: BinaryOp, l: &ScalarValue, r: &ScalarValue) -> Result<S
         }
         (S::Date(d), S::Int32(_) | S::Int64(_)) if matches!(op, BinaryOp::Add | BinaryOp::Sub) => {
             let n = r.as_i64().unwrap_or(0);
-            let v = if op == BinaryOp::Add { *d as i64 + n } else { *d as i64 - n };
+            let v = if op == BinaryOp::Add {
+                *d as i64 + n
+            } else {
+                *d as i64 - n
+            };
             Ok(S::Date(i32::try_from(v).map_err(|_| overflow())?))
         }
         (S::Date(a), S::Date(b)) if op == BinaryOp::Sub => Ok(S::Int64(*a as i64 - *b as i64)),
@@ -81,9 +86,8 @@ pub fn scalar_binary(op: BinaryOp, l: &ScalarValue, r: &ScalarValue) -> Result<S
             let (a, b) = (num(l)?, num(r)?);
             Ok(if b == 0.0 { S::Null } else { S::Float64(a / b) })
         }
-        (S::Int32(a), S::Int32(b)) => int_op(op, *a as i64, *b as i64).map(|v| {
-            i32::try_from(v).map(S::Int32).unwrap_or(S::Int64(v))
-        }),
+        (S::Int32(a), S::Int32(b)) => int_op(op, *a as i64, *b as i64)
+            .map(|v| i32::try_from(v).map(S::Int32).unwrap_or(S::Int64(v))),
         (S::Int32(_) | S::Int64(_), S::Int32(_) | S::Int64(_)) => {
             int_op(op, l.as_i64().unwrap_or(0), r.as_i64().unwrap_or(0)).map(S::Int64)
         }
@@ -118,7 +122,9 @@ fn int_op(op: BinaryOp, a: i64, b: i64) -> Result<i64> {
         }
         _ => None,
     };
-    r.ok_or_else(|| MiniLakeError::Execution(format!("integer overflow in {a} {} {b}", op.symbol())))
+    r.ok_or_else(|| {
+        MiniLakeError::Execution(format!("integer overflow in {a} {} {b}", op.symbol()))
+    })
 }
 
 /// Negate a scalar.

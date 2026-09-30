@@ -109,13 +109,7 @@ impl Accumulator {
     /// argument expression (None for COUNT(*)).
     pub fn new(func: AggregateFunction, arg_type: Option<DataType>) -> Result<Self> {
         use AggregateFunction as F;
-        let bad = || {
-            MiniLakeError::Plan(format!(
-                "{}({:?}) not supported",
-                func.name(),
-                arg_type
-            ))
-        };
+        let bad = || MiniLakeError::Plan(format!("{}({:?}) not supported", func.name(), arg_type));
         let (input_type, output_type, state) = match (func, arg_type) {
             (F::CountStar, _) => (None, DataType::Int64, State::Count(vec![])),
             (F::Count, t) => (t, DataType::Int64, State::Count(vec![])),
@@ -243,7 +237,12 @@ impl Accumulator {
 
     /// Fold raw rows into group states. `gids[k]` is the group of the k-th
     /// active row; `None` means every row belongs to group 0.
-    pub fn update(&mut self, input: Option<&Column>, rows: Rows<'_>, gids: Option<&[u32]>) -> Result<()> {
+    pub fn update(
+        &mut self,
+        input: Option<&Column>,
+        rows: Rows<'_>,
+        gids: Option<&[u32]>,
+    ) -> Result<()> {
         let gid = |k: usize| gids.map_or(0, |g| g[k] as usize);
         let is_min = self.func == AggregateFunction::Min;
         if let State::Count(counts) = &mut self.state {
@@ -358,7 +357,9 @@ impl Accumulator {
                         let x = col.str_bytes(r).unwrap_or(b"");
                         let replace = match &st[g] {
                             None => true,
-                            Some(cur) => (is_min && x < cur.as_slice()) || (!is_min && x > cur.as_slice()),
+                            Some(cur) => {
+                                (is_min && x < cur.as_slice()) || (!is_min && x > cur.as_slice())
+                            }
                         };
                         if replace {
                             st[g] = Some(x.to_vec());
@@ -382,7 +383,9 @@ impl Accumulator {
         let bm = |seen: &[bool]| Some(Bitmap::from_bools(seen));
         Ok(match &self.state {
             State::Count(v) => vec![Column::from_data(ColumnData::Int64(v.clone()))],
-            State::SumI64 { sum, seen } => vec![Column::new(ColumnData::Int64(sum.clone()), bm(seen))],
+            State::SumI64 { sum, seen } => {
+                vec![Column::new(ColumnData::Int64(sum.clone()), bm(seen))]
+            }
             State::SumF64 { sum, seen } => {
                 vec![Column::new(ColumnData::Float64(sum.clone()), bm(seen))]
             }
@@ -390,7 +393,9 @@ impl Accumulator {
                 Column::from_data(ColumnData::Float64(sum.clone())),
                 Column::from_data(ColumnData::Int64(count.clone())),
             ],
-            State::MinMaxI64 { v, seen } => vec![Column::new(ColumnData::Int64(v.clone()), bm(seen))],
+            State::MinMaxI64 { v, seen } => {
+                vec![Column::new(ColumnData::Int64(v.clone()), bm(seen))]
+            }
             State::MinMaxF64 { v, seen } => {
                 vec![Column::new(ColumnData::Float64(v.clone()), bm(seen))]
             }
@@ -443,7 +448,9 @@ impl Accumulator {
             (State::MinMaxI64 { v: st, seen }, ColumnData::Int64(v)) => {
                 for (i, &g) in gids.iter().enumerate() {
                     let g = g as usize;
-                    if valid(i) && (!seen[g] || (is_min && v[i] < st[g]) || (!is_min && v[i] > st[g])) {
+                    if valid(i)
+                        && (!seen[g] || (is_min && v[i] < st[g]) || (!is_min && v[i] > st[g]))
+                    {
                         st[g] = v[i];
                         seen[g] = true;
                     }
@@ -452,7 +459,9 @@ impl Accumulator {
             (State::MinMaxF64 { v: st, seen }, ColumnData::Float64(v)) => {
                 for (i, &g) in gids.iter().enumerate() {
                     let g = g as usize;
-                    if valid(i) && (!seen[g] || (is_min && v[i] < st[g]) || (!is_min && v[i] > st[g])) {
+                    if valid(i)
+                        && (!seen[g] || (is_min && v[i] < st[g]) || (!is_min && v[i] > st[g]))
+                    {
                         st[g] = v[i];
                         seen[g] = true;
                     }
@@ -467,7 +476,9 @@ impl Accumulator {
                     let g = g as usize;
                     let replace = match &st[g] {
                         None => true,
-                        Some(cur) => (is_min && x < cur.as_slice()) || (!is_min && x > cur.as_slice()),
+                        Some(cur) => {
+                            (is_min && x < cur.as_slice()) || (!is_min && x > cur.as_slice())
+                        }
                     };
                     if replace {
                         st[g] = Some(x.to_vec());
@@ -519,9 +530,15 @@ impl Accumulator {
         let n = self.num_groups();
         match &self.state {
             State::Count(_) => n * 8,
-            State::SumI64 { .. } | State::SumF64 { .. } | State::MinMaxI64 { .. } | State::MinMaxF64 { .. } => n * 9,
+            State::SumI64 { .. }
+            | State::SumF64 { .. }
+            | State::MinMaxI64 { .. }
+            | State::MinMaxF64 { .. } => n * 9,
             State::Avg { .. } => n * 16,
-            State::MinMaxStr { v } => v.iter().map(|x| 24 + x.as_ref().map_or(0, |s| s.len())).sum(),
+            State::MinMaxStr { v } => v
+                .iter()
+                .map(|x| 24 + x.as_ref().map_or(0, |s| s.len()))
+                .sum(),
         }
     }
 }

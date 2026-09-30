@@ -90,8 +90,14 @@ pub fn fold_plan(plan: LogicalPlan) -> Result<LogicalPlan> {
             schema,
         } => LogicalPlan::Aggregate {
             input: Box::new(fold_plan(*input)?),
-            group_exprs: group_exprs.into_iter().map(fold_expr).collect::<Result<_>>()?,
-            aggregates: aggregates.into_iter().map(fold_expr).collect::<Result<_>>()?,
+            group_exprs: group_exprs
+                .into_iter()
+                .map(fold_expr)
+                .collect::<Result<_>>()?,
+            aggregates: aggregates
+                .into_iter()
+                .map(fold_expr)
+                .collect::<Result<_>>()?,
             schema,
         },
         LogicalPlan::Join {
@@ -132,13 +138,20 @@ mod tests {
             BinaryOp::Add,
             Expr::Literal(ScalarValue::Decimal(1, 2)),
         );
-        assert_eq!(fold_expr(e).unwrap(), Expr::Literal(ScalarValue::Decimal(7, 2)));
+        assert_eq!(
+            fold_expr(e).unwrap(),
+            Expr::Literal(ScalarValue::Decimal(7, 2))
+        );
     }
 
     #[test]
     fn simplifies_boolean() {
         let x = Expr::col(None, "x");
-        let e = Expr::binary(x.clone(), BinaryOp::And, Expr::Literal(ScalarValue::Boolean(true)));
+        let e = Expr::binary(
+            x.clone(),
+            BinaryOp::And,
+            Expr::Literal(ScalarValue::Boolean(true)),
+        );
         assert_eq!(fold_expr(e).unwrap(), x);
     }
 }

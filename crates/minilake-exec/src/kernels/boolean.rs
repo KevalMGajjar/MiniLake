@@ -12,6 +12,9 @@
 use minilake_core::Bitmap;
 
 /// Kleene AND. Returns (values, validity).
+// The validity rule is spelled out as the three rows of the truth table on
+// purpose; the "simplified" form clippy suggests is harder to check.
+#[allow(clippy::nonminimal_bool)]
 pub fn and(
     a: &[bool],
     av: Option<&Bitmap>,
@@ -33,6 +36,7 @@ pub fn and(
 }
 
 /// Kleene OR. Returns (values, validity).
+#[allow(clippy::nonminimal_bool)]
 pub fn or(
     a: &[bool],
     av: Option<&Bitmap>,

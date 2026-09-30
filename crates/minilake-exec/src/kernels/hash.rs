@@ -88,9 +88,8 @@ pub fn values_equal(x: &Column, a: usize, y: &Column, b: usize) -> bool {
         _ => return false,
     }
     match (x.data(), y.data()) {
-        (ColumnData::Int32(p), ColumnData::Int32(q)) | (ColumnData::Date(p), ColumnData::Date(q)) => {
-            p[a] == q[b]
-        }
+        (ColumnData::Int32(p), ColumnData::Int32(q))
+        | (ColumnData::Date(p), ColumnData::Date(q)) => p[a] == q[b],
         (ColumnData::Int64(p), ColumnData::Int64(q)) => p[a] == q[b],
         (ColumnData::Float64(p), ColumnData::Float64(q)) => p[a] == q[b],
         (ColumnData::Boolean(p), ColumnData::Boolean(q)) => p[a] == q[b],

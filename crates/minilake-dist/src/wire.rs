@@ -58,7 +58,9 @@ fn read_u64(r: &mut impl Read) -> Result<u64> {
 fn read_str(r: &mut impl Read) -> Result<String> {
     let n = read_u32(r)? as usize;
     if n > 64 << 20 {
-        return Err(MiniLakeError::Execution("string too long in request".into()));
+        return Err(MiniLakeError::Execution(
+            "string too long in request".into(),
+        ));
     }
     let mut v = vec![0u8; n];
     r.read_exact(&mut v)?;
@@ -132,9 +134,10 @@ pub fn read_response(r: &mut impl Read) -> Result<Vec<Batch>> {
     let n = read_u32(r)? as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        out.push(read_batch(r)?.ok_or_else(|| {
-            MiniLakeError::Execution("truncated response from worker".into())
-        })?);
+        out.push(
+            read_batch(r)?
+                .ok_or_else(|| MiniLakeError::Execution("truncated response from worker".into()))?,
+        );
     }
     Ok(out)
 }

@@ -49,7 +49,10 @@ fn bench_queues(c: &mut Criterion) {
         let mut g = c.benchmark_group(format!("morsel_queue_work{work}"));
         g.throughput(Throughput::Elements(MORSELS as u64));
         g.sample_size(10);
-        for threads in [1usize, 2, 4, 8, 12].into_iter().filter(|&t| t <= max_threads) {
+        for threads in [1usize, 2, 4, 8, 12]
+            .into_iter()
+            .filter(|&t| t <= max_threads)
+        {
             g.bench_with_input(BenchmarkId::new("atomic", threads), &threads, |b, &t| {
                 b.iter(|| drain(&AtomicMorselQueue::new(MORSELS), t, work))
             });

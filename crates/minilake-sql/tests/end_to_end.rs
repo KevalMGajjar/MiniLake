@@ -45,7 +45,11 @@ fn lines() -> Vec<Line> {
     (0..N_LINE)
         .map(|i| Line {
             orderkey: (i % N_ORD) as i64,
-            qty: if i % 13 == 0 { None } else { Some((i % 50) as f64) },
+            qty: if i % 13 == 0 {
+                None
+            } else {
+                Some((i % 50) as f64)
+            },
             price: (i % 97) as f64 + 0.5,
             flag: FLAGS[i % 3],
             shipdate: day0() + (i % 30) as i32,
@@ -80,24 +84,34 @@ fn write_lineitem(path: &Path, rows: &[Line]) {
             match idx {
                 0 => {
                     let v: Vec<i64> = chunk.iter().map(|r| r.orderkey).collect();
-                    col.typed::<Int64Type>().write_batch(&v, None, None).unwrap();
+                    col.typed::<Int64Type>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
                 1 => {
                     let v: Vec<f64> = chunk.iter().filter_map(|r| r.qty).collect();
                     let d: Vec<i16> = chunk.iter().map(|r| r.qty.is_some() as i16).collect();
-                    col.typed::<DoubleType>().write_batch(&v, Some(&d), None).unwrap();
+                    col.typed::<DoubleType>()
+                        .write_batch(&v, Some(&d), None)
+                        .unwrap();
                 }
                 2 => {
                     let v: Vec<f64> = chunk.iter().map(|r| r.price).collect();
-                    col.typed::<DoubleType>().write_batch(&v, None, None).unwrap();
+                    col.typed::<DoubleType>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
                 3 => {
                     let v: Vec<ByteArray> = chunk.iter().map(|r| ByteArray::from(r.flag)).collect();
-                    col.typed::<ByteArrayType>().write_batch(&v, None, None).unwrap();
+                    col.typed::<ByteArrayType>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
                 _ => {
                     let v: Vec<i32> = chunk.iter().map(|r| r.shipdate).collect();
-                    col.typed::<Int32Type>().write_batch(&v, None, None).unwrap();
+                    col.typed::<Int32Type>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
             }
             col.close().unwrap();
@@ -126,15 +140,21 @@ fn write_orders(path: &Path, rows: &[Order]) {
             match idx {
                 0 => {
                     let v: Vec<i64> = chunk.iter().map(|r| r.orderkey).collect();
-                    col.typed::<Int64Type>().write_batch(&v, None, None).unwrap();
+                    col.typed::<Int64Type>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
                 1 => {
                     let v: Vec<i32> = chunk.iter().map(|r| r.date).collect();
-                    col.typed::<Int32Type>().write_batch(&v, None, None).unwrap();
+                    col.typed::<Int32Type>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
                 _ => {
                     let v: Vec<ByteArray> = chunk.iter().map(|r| ByteArray::from(r.prio)).collect();
-                    col.typed::<ByteArrayType>().write_batch(&v, None, None).unwrap();
+                    col.typed::<ByteArrayType>()
+                        .write_batch(&v, None, None)
+                        .unwrap();
                 }
             }
             col.close().unwrap();
@@ -157,10 +177,7 @@ fn fixture() -> Fixture {
     write_lineitem(&dir.path().join("lineitem/part-0.parquet"), &lines());
     write_orders(&dir.path().join("orders/part-0.parquet"), &orders());
     let catalog = Arc::new(Catalog::open(dir.path()).unwrap());
-    Fixture {
-        _dir: dir,
-        catalog,
-    }
+    Fixture { _dir: dir, catalog }
 }
 
 fn session(f: &Fixture, threads: usize) -> Session {
@@ -181,7 +198,11 @@ fn rows(s: &Session, sql: &str) -> Vec<Vec<ScalarValue>> {
             .iter()
             .flat_map(|b| {
                 (0..b.num_rows())
-                    .map(|i| (0..b.num_columns()).map(|c| b.column(c).scalar_at(i)).collect())
+                    .map(|i| {
+                        (0..b.num_columns())
+                            .map(|c| b.column(c).scalar_at(i))
+                            .collect()
+                    })
                     .collect::<Vec<Vec<ScalarValue>>>()
             })
             .collect(),
@@ -190,7 +211,8 @@ fn rows(s: &Session, sql: &str) -> Vec<Vec<ScalarValue>> {
 }
 
 fn approx(a: &ScalarValue, b: f64) -> bool {
-    a.as_f64().is_some_and(|x| (x - b).abs() <= 1e-9 * b.abs().max(1.0))
+    a.as_f64()
+        .is_some_and(|x| (x - b).abs() <= 1e-9 * b.abs().max(1.0))
 }
 
 #[test]
@@ -199,7 +221,13 @@ fn count_star_and_nulls() {
     let s = session(&f, 2);
     let r = rows(&s, "SELECT count(*), count(l_qty) FROM lineitem");
     let nulls = lines().iter().filter(|l| l.qty.is_none()).count();
-    assert_eq!(r, vec![vec![ScalarValue::Int64(N_LINE as i64), ScalarValue::Int64((N_LINE - nulls) as i64)]]);
+    assert_eq!(
+        r,
+        vec![vec![
+            ScalarValue::Int64(N_LINE as i64),
+            ScalarValue::Int64((N_LINE - nulls) as i64)
+        ]]
+    );
 }
 
 #[test]
@@ -208,7 +236,9 @@ fn group_by_order_by_matches_reference() {
     let cutoff = parse_date("1995-01-10").unwrap();
     let mut reference: BTreeMap<&str, (f64, i64, f64, i64, i32)> = BTreeMap::new();
     for l in lines().iter().filter(|l| l.shipdate < cutoff) {
-        let e = reference.entry(l.flag).or_insert((0.0, 0, 0.0, 0, i32::MAX));
+        let e = reference
+            .entry(l.flag)
+            .or_insert((0.0, 0, 0.0, 0, i32::MAX));
         e.0 += l.price;
         e.1 += 1;
         if let Some(q) = l.qty {
@@ -279,7 +309,10 @@ fn explain_shows_pruning_and_pushdown() {
     };
     // 10 row groups (one per date); dates 01-08..01-10 survive => 3 of 10.
     assert!(t.contains("row_groups=3/10"), "{t}");
-    let r = rows(&s, "SELECT count(*) FROM orders WHERE o_orderdate >= DATE '1995-01-08'");
+    let r = rows(
+        &s,
+        "SELECT count(*) FROM orders WHERE o_orderdate >= DATE '1995-01-08'",
+    );
     assert_eq!(r[0][0], ScalarValue::Int64(300));
 }
 
@@ -297,7 +330,10 @@ fn case_in_like_between() {
         .into_iter()
         .filter(|l| l.price >= 10.0 && l.price <= 20.0)
         .collect();
-    let ar = sel.iter().filter(|l| l.flag == "A" || l.flag == "R").count();
+    let ar = sel
+        .iter()
+        .filter(|l| l.flag == "A" || l.flag == "R")
+        .count();
     assert_eq!(r[0][0], ScalarValue::Int64(ar as i64));
     assert_eq!(r[0][1], ScalarValue::Int64(sel.len() as i64));
 }
@@ -316,7 +352,10 @@ fn join_over_memory_budget_fails_cleanly() {
         .run("SELECT count(*) FROM orders, lineitem WHERE o_orderkey = l_orderkey")
         .err()
         .expect("should exceed 1 KiB");
-    assert!(matches!(err, MiniLakeError::ResourcesExhausted { .. }), "{err}");
+    assert!(
+        matches!(err, MiniLakeError::ResourcesExhausted { .. }),
+        "{err}"
+    );
 }
 
 #[test]

@@ -216,7 +216,10 @@ mod tests {
         let back = read_all_batches(&mut buf.as_slice()).unwrap();
         assert_eq!(back.len(), 2);
         assert_eq!(back[0].column(0).scalar_at(1), ScalarValue::Null);
-        assert_eq!(back[1].column(2).scalar_at(2), ScalarValue::Utf8("hello".into()));
+        assert_eq!(
+            back[1].column(2).scalar_at(2),
+            ScalarValue::Utf8("hello".into())
+        );
         assert_eq!(back[0].column(3).data_type(), DataType::Date);
     }
 }

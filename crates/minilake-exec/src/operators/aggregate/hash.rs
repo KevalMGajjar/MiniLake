@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 
 use minilake_core::ipc::{read_batch, write_batch};
 use minilake_core::{Batch, Column, DataType, MiniLakeError, Result};
-use tempfile::NamedTempFile;
 use minilake_hashtable::{KeyStore, SwissTable};
+use tempfile::NamedTempFile;
 
 use super::group_keys::GroupKeys;
 use super::{batch_rows, Accumulator, AggMode, AggregateExpr, Rows};
@@ -68,7 +68,10 @@ impl HashAggState {
             key_types: key_types.to_vec(),
             keys: GroupKeys::new(key_types),
             table: SwissTable::with_capacity(0),
-            accs: aggs.iter().map(|a| a.accumulator()).collect::<Result<_>>()?,
+            accs: aggs
+                .iter()
+                .map(|a| a.accumulator())
+                .collect::<Result<_>>()?,
             hashes: Vec::new(),
             gids: Vec::new(),
         })
@@ -229,7 +232,11 @@ impl Inner {
         let batch = state.partial_batch()?;
         let nk = self.key_types.len();
         let mut hashes = Vec::new();
-        hash_columns(&batch.columns()[..nk], Rows::All(batch.num_rows()), &mut hashes);
+        hash_columns(
+            &batch.columns()[..nk],
+            Rows::All(batch.num_rows()),
+            &mut hashes,
+        );
         let mut parts: Vec<Vec<u32>> = vec![Vec::new(); SPILL_PARTITIONS];
         for (r, &h) in hashes.iter().enumerate() {
             parts[spill_partition(h)].push(r as u32);
@@ -247,7 +254,11 @@ impl Inner {
                 continue;
             }
             let part = Batch::try_new(
-                batch.columns().iter().map(|c| Arc::new(c.gather(rows))).collect(),
+                batch
+                    .columns()
+                    .iter()
+                    .map(|c| Arc::new(c.gather(rows)))
+                    .collect(),
                 rows.len(),
             )?;
             let mut file = tempfile::Builder::new()
@@ -264,10 +275,8 @@ impl Inner {
         self.spilled.store(true, Ordering::Release);
         let n_files: usize = files.iter().map(|f| f.len()).sum();
         self.metrics.set_extra("spill_files", n_files.to_string());
-        self.metrics.set_extra(
-            "spilled_bytes_last",
-            crate::metrics::format_bytes(written),
-        );
+        self.metrics
+            .set_extra("spilled_bytes_last", crate::metrics::format_bytes(written));
         Ok(())
     }
 }
@@ -324,7 +333,9 @@ impl HashAggLocal {
         let need = self.state.memory_size();
         match self.reservation.try_resize(need) {
             Ok(()) => {
-                self.inner.metrics.update_peak_memory(self.reservation.size());
+                self.inner
+                    .metrics
+                    .update_peak_memory(self.reservation.size());
                 Ok(())
             }
             Err(e) => match &self.spill_dir {
@@ -397,7 +408,8 @@ impl Sink for HashAggregateSink {
         let mut out = Vec::new();
         for part in &files {
             let mut state = HashAggState::new(&inner.key_types, &inner.aggs)?;
-            let mut res = MemoryReservation::new(&ctx.memory_pool, "HashAggregate(merge spilled partition)");
+            let mut res =
+                MemoryReservation::new(&ctx.memory_pool, "HashAggregate(merge spilled partition)");
             for f in part {
                 let mut r = BufReader::new(f.reopen()?);
                 while let Some(b) = read_batch(&mut r)? {

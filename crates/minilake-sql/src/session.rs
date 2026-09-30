@@ -45,9 +45,16 @@ pub struct Session {
 /// Split an optional `EXPLAIN [ANALYZE]` prefix off the SQL text.
 pub fn split_explain(sql: &str) -> (StatementKind, &str) {
     let trimmed = sql.trim_start();
-    let upper: String = trimmed.chars().take(16).collect::<String>().to_ascii_uppercase();
+    let upper: String = trimmed
+        .chars()
+        .take(16)
+        .collect::<String>()
+        .to_ascii_uppercase();
     if upper.starts_with("EXPLAIN ANALYZE") {
-        (StatementKind::ExplainAnalyze, &trimmed["EXPLAIN ANALYZE".len()..])
+        (
+            StatementKind::ExplainAnalyze,
+            &trimmed["EXPLAIN ANALYZE".len()..],
+        )
     } else if upper.starts_with("EXPLAIN") {
         (StatementKind::Explain, &trimmed["EXPLAIN".len()..])
     } else {
@@ -68,7 +75,9 @@ impl Session {
         match stmts.as_slice() {
             [stmt] => Binder::new(&self.catalog).bind_statement(stmt),
             [] => Err(MiniLakeError::Parse("empty statement".into())),
-            _ => Err(MiniLakeError::Parse("expected exactly one statement".into())),
+            _ => Err(MiniLakeError::Parse(
+                "expected exactly one statement".into(),
+            )),
         }
     }
 

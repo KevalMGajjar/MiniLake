@@ -128,7 +128,12 @@ impl Sink for JoinBuildSink {
                 .map_err(|_| MiniLakeError::Internal("poisoned lock".into()))?,
         );
         let collected: usize = batches.iter().map(|b| b.memory_size()).sum();
-        let table = build_table(&batches, &self.inner.keys, &self.inner.key_types, self.inner.num_columns)?;
+        let table = build_table(
+            &batches,
+            &self.inner.keys,
+            &self.inner.key_types,
+            self.inner.num_columns,
+        )?;
         drop(batches);
         // The concatenated build batch replaces the collected batches; reserve
         // the hash table and chains on top of them.
@@ -136,7 +141,9 @@ impl Sink for JoinBuildSink {
         res.try_grow(table.memory_size().saturating_sub(collected))?;
         let total = collected + res.size();
         self.inner.metrics.update_peak_memory(total);
-        self.inner.metrics.set_extra("build_rows", table.batch.num_rows().to_string());
+        self.inner
+            .metrics
+            .set_extra("build_rows", table.batch.num_rows().to_string());
         self.inner
             .reservations
             .lock()
@@ -176,8 +183,7 @@ pub fn build_table(
             continue;
         }
         let probe = table.find_or_vacant(hashes[r], |head| {
-            keys.iter()
-                .all(|k| values_equal(k, head as usize, k, r))
+            keys.iter().all(|k| values_equal(k, head as usize, k, r))
         });
         match probe {
             Probe::Found(head) => {
@@ -311,7 +317,11 @@ impl Operator for HashJoinProbe {
 
 impl HashJoinProbe {
     fn emit(&self, probe: &Batch, jt: &JoinTable, pi: &[u32], bi: &[u32]) -> Result<Batch> {
-        let p: Vec<Arc<Column>> = probe.columns().iter().map(|c| Arc::new(c.gather(pi))).collect();
+        let p: Vec<Arc<Column>> = probe
+            .columns()
+            .iter()
+            .map(|c| Arc::new(c.gather(pi)))
+            .collect();
         let b: Vec<Arc<Column>> = jt
             .batch
             .columns()

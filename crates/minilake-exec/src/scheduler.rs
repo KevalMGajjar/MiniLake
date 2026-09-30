@@ -122,8 +122,9 @@ where
         handles
             .into_iter()
             .map(|h| {
-                h.join()
-                    .unwrap_or_else(|_| Err(MiniLakeError::Internal("worker thread panicked".into())))
+                h.join().unwrap_or_else(|_| {
+                    Err(MiniLakeError::Internal("worker thread panicked".into()))
+                })
             })
             .collect()
     });

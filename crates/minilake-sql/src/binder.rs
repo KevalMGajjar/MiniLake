@@ -149,13 +149,12 @@ impl<'a> Binder<'a> {
                 for e in exprs {
                     // GROUP BY 1 / GROUP BY alias
                     let bound = if let Some(pos) = positional(e) {
-                        items
-                            .get(pos)
-                            .map(|i| i.expr.clone())
-                            .ok_or_else(|| MiniLakeError::Plan(format!("GROUP BY {} out of range", pos + 1)))?
-                    } else if let Some(i) = alias_ref(e).and_then(|a| {
-                        items.iter().find(|i| i.has_alias && i.name == a)
-                    }) {
+                        items.get(pos).map(|i| i.expr.clone()).ok_or_else(|| {
+                            MiniLakeError::Plan(format!("GROUP BY {} out of range", pos + 1))
+                        })?
+                    } else if let Some(i) =
+                        alias_ref(e).and_then(|a| items.iter().find(|i| i.has_alias && i.name == a))
+                    {
                         i.expr.clone()
                     } else {
                         self.bind_expr(e, &from_schema)?
@@ -182,12 +181,15 @@ impl<'a> Binder<'a> {
             let nulls_first = ob.options.nulls_first.unwrap_or(false);
             let target = if let Some(pos) = positional(&ob.expr) {
                 if pos >= items.len() {
-                    return Err(MiniLakeError::Plan(format!("ORDER BY {} out of range", pos + 1)));
+                    return Err(MiniLakeError::Plan(format!(
+                        "ORDER BY {} out of range",
+                        pos + 1
+                    )));
                 }
                 SortTarget::Output(pos)
-            } else if let Some(i) = alias_ref(&ob.expr).and_then(|a| {
-                items.iter().position(|i| i.has_alias && i.name == a)
-            }) {
+            } else if let Some(i) = alias_ref(&ob.expr)
+                .and_then(|a| items.iter().position(|i| i.has_alias && i.name == a))
+            {
                 SortTarget::Output(i)
             } else {
                 SortTarget::Expr(self.bind_expr(&ob.expr, &from_schema)?)
@@ -290,7 +292,10 @@ impl<'a> Binder<'a> {
                 Ok(out)
             };
             for i in &mut items {
-                i.expr = rewrite(std::mem::replace(&mut i.expr, Expr::Literal(ScalarValue::Null)))?;
+                i.expr = rewrite(std::mem::replace(
+                    &mut i.expr,
+                    Expr::Literal(ScalarValue::Null),
+                ))?;
             }
             if let Some(h) = having.take() {
                 having = Some(rewrite(h)?);
@@ -432,7 +437,8 @@ impl<'a> Binder<'a> {
 
         let mut conjuncts = Vec::new();
         for e in on_conditions.into_iter().chain(select.selection.as_ref()) {
-            self.bind_expr(e, &combined)?.split_conjunction(&mut conjuncts);
+            self.bind_expr(e, &combined)?
+                .split_conjunction(&mut conjuncts);
         }
 
         // Greedy left-deep join assembly in FROM order: repeatedly join the
@@ -781,7 +787,10 @@ fn bind_value(v: &ast::Value) -> Result<ScalarValue> {
 fn parse_number(s: &str) -> Result<ScalarValue> {
     let bad = || MiniLakeError::Plan(format!("invalid number '{s}'"));
     if s.contains(['e', 'E']) {
-        return s.parse::<f64>().map(ScalarValue::Float64).map_err(|_| bad());
+        return s
+            .parse::<f64>()
+            .map(ScalarValue::Float64)
+            .map_err(|_| bad());
     }
     if let Some((int, frac)) = s.split_once('.') {
         let digits = format!("{int}{frac}");
@@ -877,9 +886,9 @@ fn apply_interval(base: Expr, iv: &ast::Interval, sign: i64) -> Result<Expr> {
             // Month arithmetic is only supported on constant dates, which is
             // what TPC-H uses; fold the base first.
             match fold_expr(base)? {
-                Expr::Literal(ScalarValue::Date(d)) => {
-                    Ok(Expr::Literal(ScalarValue::Date(add_months(d, months as i32))))
-                }
+                Expr::Literal(ScalarValue::Date(d)) => Ok(Expr::Literal(ScalarValue::Date(
+                    add_months(d, months as i32),
+                ))),
                 _ => unsupported("month/year intervals on non-constant dates"),
             }
         }
@@ -927,11 +936,9 @@ fn coerce_literal(e: Expr, other: Option<DataType>) -> Result<Expr> {
         return Ok(e);
     };
     Ok(match (v, other) {
-        (ScalarValue::Utf8(s), Some(DataType::Date)) => {
-            Expr::Literal(ScalarValue::Date(parse_date(s).ok_or_else(|| {
-                MiniLakeError::Plan(format!("invalid date '{s}'"))
-            })?))
-        }
+        (ScalarValue::Utf8(s), Some(DataType::Date)) => Expr::Literal(ScalarValue::Date(
+            parse_date(s).ok_or_else(|| MiniLakeError::Plan(format!("invalid date '{s}'")))?,
+        )),
         (ScalarValue::Int64(x), Some(DataType::Int32 | DataType::Date)) => {
             match i32::try_from(*x) {
                 Ok(v) => Expr::Literal(ScalarValue::Int32(v)),

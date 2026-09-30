@@ -399,7 +399,11 @@ impl fmt::Display for Expr {
                 expr,
                 pattern,
                 negated,
-            } => write!(f, "{expr} {}LIKE '{pattern}'", if *negated { "NOT " } else { "" }),
+            } => write!(
+                f,
+                "{expr} {}LIKE '{pattern}'",
+                if *negated { "NOT " } else { "" }
+            ),
             Expr::InList {
                 expr,
                 list,
@@ -467,7 +471,10 @@ impl LogicalSchema {
         let mut hits = self.fields.iter().enumerate().filter(|(_, f)| {
             f.name.eq_ignore_ascii_case(&name)
                 && match &c.relation {
-                    Some(r) => f.relation.as_deref().is_some_and(|fr| fr.eq_ignore_ascii_case(r)),
+                    Some(r) => f
+                        .relation
+                        .as_deref()
+                        .is_some_and(|fr| fr.eq_ignore_ascii_case(r)),
                     None => true,
                 }
         });
@@ -653,7 +660,11 @@ impl LogicalPlan {
             } => {
                 let g: Vec<String> = group_exprs.iter().map(|e| e.to_string()).collect();
                 let a: Vec<String> = aggregates.iter().map(|e| e.to_string()).collect();
-                format!("Aggregate: group_by=[{}] aggs=[{}]", g.join(", "), a.join(", "))
+                format!(
+                    "Aggregate: group_by=[{}] aggs=[{}]",
+                    g.join(", "),
+                    a.join(", ")
+                )
             }
             LogicalPlan::Join { on, .. } => {
                 let k: Vec<String> = on.iter().map(|(l, r)| format!("{l} = {r}")).collect();

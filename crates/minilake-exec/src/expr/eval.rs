@@ -91,12 +91,19 @@ pub fn evaluate(expr: &PhysicalExpr, batch: &Batch) -> Result<Datum> {
             Datum::Scalar(s) => Ok(Datum::Scalar(scalar_negate(&s)?)),
             Datum::Array(c) => {
                 let data = match c.data() {
-                    ColumnData::Int32(v) => ColumnData::Int32(v.iter().map(|x| x.wrapping_neg()).collect()),
-                    ColumnData::Int64(v) => ColumnData::Int64(v.iter().map(|x| x.wrapping_neg()).collect()),
+                    ColumnData::Int32(v) => {
+                        ColumnData::Int32(v.iter().map(|x| x.wrapping_neg()).collect())
+                    }
+                    ColumnData::Int64(v) => {
+                        ColumnData::Int64(v.iter().map(|x| x.wrapping_neg()).collect())
+                    }
                     ColumnData::Float64(v) => ColumnData::Float64(v.iter().map(|x| -x).collect()),
                     _ => return Err(MiniLakeError::Execution("cannot negate".into())),
                 };
-                Ok(Datum::Array(Arc::new(Column::new(data, c.validity().cloned()))))
+                Ok(Datum::Array(Arc::new(Column::new(
+                    data,
+                    c.validity().cloned(),
+                ))))
             }
         },
         PhysicalExpr::IsNull { expr, negated } => {
@@ -116,9 +123,9 @@ pub fn evaluate(expr: &PhysicalExpr, batch: &Batch) -> Result<Datum> {
         } => {
             let d = evaluate(expr, batch)?;
             Ok(match d {
-                Datum::Scalar(ScalarValue::Utf8(s)) => {
-                    Datum::Scalar(ScalarValue::Boolean(pattern.matches(s.as_bytes()) != *negated))
-                }
+                Datum::Scalar(ScalarValue::Utf8(s)) => Datum::Scalar(ScalarValue::Boolean(
+                    pattern.matches(s.as_bytes()) != *negated,
+                )),
                 Datum::Scalar(_) => Datum::Scalar(ScalarValue::Null),
                 Datum::Array(c) => {
                     let mut m = string::like(&c, pattern);
@@ -228,7 +235,8 @@ fn binary(op: BinaryOp, l: Datum, r: Datum, n: usize) -> Result<Datum> {
         return logical(op, l, r, n);
     }
     // NULL constant on either side: the result is all NULL.
-    if matches!(&l, Datum::Scalar(s) if s.is_null()) || matches!(&r, Datum::Scalar(s) if s.is_null())
+    if matches!(&l, Datum::Scalar(s) if s.is_null())
+        || matches!(&r, Datum::Scalar(s) if s.is_null())
     {
         return Ok(Datum::Scalar(ScalarValue::Null));
     }
@@ -256,7 +264,10 @@ fn binary(op: BinaryOp, l: Datum, r: Datum, n: usize) -> Result<Datum> {
         let values = div_f64(a, b, n);
         // x / 0 is NULL in SQL (DuckDB semantics), not +inf.
         let validity = mask_zero_divisors(validity, b, n);
-        return Ok(Datum::Array(Arc::new(Column::new(ColumnData::Float64(values), validity))));
+        return Ok(Datum::Array(Arc::new(Column::new(
+            ColumnData::Float64(values),
+            validity,
+        ))));
     }
     let data = match ct {
         DataType::Int32 | DataType::Date => {
@@ -270,9 +281,7 @@ fn binary(op: BinaryOp, l: Datum, r: Datum, n: usize) -> Result<Datum> {
             }
         }
         DataType::Int64 => ColumnData::Int64(arith(op, operand_i64(&l)?, operand_i64(&r)?, n)?),
-        DataType::Float64 => {
-            ColumnData::Float64(arith(op, operand_f64(&l)?, operand_f64(&r)?, n)?)
-        }
+        DataType::Float64 => ColumnData::Float64(arith(op, operand_f64(&l)?, operand_f64(&r)?, n)?),
         other => {
             return Err(MiniLakeError::Execution(format!(
                 "arithmetic on {other} is not supported"
@@ -374,7 +383,9 @@ macro_rules! operand_fn {
     };
 }
 
-operand_fn!(operand_i32, i32, Int32 | Date, |s| s.as_i64().map(|v| v as i32));
+operand_fn!(operand_i32, i32, Int32 | Date, |s| s
+    .as_i64()
+    .map(|v| v as i32));
 operand_fn!(operand_i64, i64, Int64, |s| s.as_i64());
 operand_fn!(operand_f64, f64, Float64, |s| s.as_f64());
 operand_fn!(operand_bool, bool, Boolean, |s| s.as_bool());
@@ -405,15 +416,24 @@ fn in_list(d: Datum, list: &[ScalarValue], negated: bool) -> Result<Datum> {
             string::in_list(&c, &items)
         }
         ColumnData::Int32(v) | ColumnData::Date(v) => {
-            let items: Vec<i32> = cast_list(list, dt)?.iter().filter_map(|s| s.as_i64().map(|x| x as i32)).collect();
+            let items: Vec<i32> = cast_list(list, dt)?
+                .iter()
+                .filter_map(|s| s.as_i64().map(|x| x as i32))
+                .collect();
             v.iter().map(|x| items.contains(x)).collect()
         }
         ColumnData::Int64(v) => {
-            let items: Vec<i64> = cast_list(list, dt)?.iter().filter_map(|s| s.as_i64()).collect();
+            let items: Vec<i64> = cast_list(list, dt)?
+                .iter()
+                .filter_map(|s| s.as_i64())
+                .collect();
             v.iter().map(|x| items.contains(x)).collect()
         }
         ColumnData::Float64(v) => {
-            let items: Vec<f64> = cast_list(list, dt)?.iter().filter_map(|s| s.as_f64()).collect();
+            let items: Vec<f64> = cast_list(list, dt)?
+                .iter()
+                .filter_map(|s| s.as_f64())
+                .collect();
             v.iter().map(|x| items.contains(x)).collect()
         }
         ColumnData::Boolean(v) => {
@@ -428,7 +448,9 @@ fn in_list(d: Datum, list: &[ScalarValue], negated: bool) -> Result<Datum> {
 }
 
 fn cast_list(list: &[ScalarValue], dt: DataType) -> Result<Vec<ScalarValue>> {
-    list.iter().map(|v| normalize(v.clone()).cast_to(dt)).collect()
+    list.iter()
+        .map(|v| normalize(v.clone()).cast_to(dt))
+        .collect()
 }
 
 /// `CASE WHEN ... THEN ... ELSE ... END`.
@@ -454,7 +476,9 @@ fn case(
     for (bi, (cond, _)) in branches.iter().enumerate() {
         let c = evaluate(cond, batch)?.into_column(n, DataType::Boolean)?;
         let ColumnData::Boolean(m) = c.data() else {
-            return Err(MiniLakeError::Execution("CASE condition is not boolean".into()));
+            return Err(MiniLakeError::Execution(
+                "CASE condition is not boolean".into(),
+            ));
         };
         for i in 0..n {
             let take = !decided[i] & m[i] & c.is_valid(i);

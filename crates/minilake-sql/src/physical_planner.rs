@@ -149,7 +149,10 @@ pub fn create_physical_plan(plan: &LogicalPlan) -> Result<PhysicalPlan> {
         } => {
             // ORDER BY + LIMIT -> top-N: never sort more than limit+offset rows.
             if let LogicalPlan::Sort { .. } = input.as_ref() {
-                let PhysicalPlan::Sort { input: si, keys, .. } = create_physical_plan(input)? else {
+                let PhysicalPlan::Sort {
+                    input: si, keys, ..
+                } = create_physical_plan(input)?
+                else {
                     return Err(MiniLakeError::Internal("expected sort".into()));
                 };
                 let top = PhysicalPlan::Sort {

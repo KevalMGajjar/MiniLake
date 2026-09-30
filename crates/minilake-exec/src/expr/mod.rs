@@ -51,7 +51,12 @@ impl BinaryOp {
     pub fn is_comparison(self) -> bool {
         matches!(
             self,
-            BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq
+            BinaryOp::Eq
+                | BinaryOp::NotEq
+                | BinaryOp::Lt
+                | BinaryOp::LtEq
+                | BinaryOp::Gt
+                | BinaryOp::GtEq
         )
     }
 
@@ -193,11 +198,15 @@ impl PhysicalExpr {
     /// Result type given the input schema.
     pub fn data_type(&self, schema: &Schema) -> Result<DataType> {
         Ok(match self {
-            PhysicalExpr::Column { index, .. } => schema
-                .fields
-                .get(*index)
-                .ok_or_else(|| MiniLakeError::Internal(format!("column #{index} out of range")))?
-                .data_type,
+            PhysicalExpr::Column { index, .. } => {
+                schema
+                    .fields
+                    .get(*index)
+                    .ok_or_else(|| {
+                        MiniLakeError::Internal(format!("column #{index} out of range"))
+                    })?
+                    .data_type
+            }
             PhysicalExpr::Literal(v) => v.data_type().unwrap_or(DataType::Int64),
             PhysicalExpr::Binary { op, left, right } => {
                 if op.is_comparison() || op.is_logical() {

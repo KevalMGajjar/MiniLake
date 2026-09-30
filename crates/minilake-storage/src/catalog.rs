@@ -45,7 +45,10 @@ impl Catalog {
                     tables.insert(name.clone(), Arc::new(Table::open(&name, &files)?));
                 }
             } else if path.extension().is_some_and(|e| e == "parquet") {
-                tables.insert(name.clone(), Arc::new(Table::open(&name, &[path.clone()])?));
+                tables.insert(
+                    name.clone(),
+                    Arc::new(Table::open(&name, std::slice::from_ref(&path))?),
+                );
             }
         }
         Ok(Catalog {

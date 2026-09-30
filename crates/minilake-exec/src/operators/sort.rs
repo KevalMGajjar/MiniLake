@@ -82,7 +82,11 @@ fn compare_rows(keys: &[(View<'_>, &Column, &SortKey)], a: usize, b: usize) -> O
 }
 
 /// Sort `batches` by `keys`, keeping at most `limit` rows.
-pub fn sort_batches(batches: &[Batch], keys: &[SortKey], limit: Option<usize>) -> Result<Option<Batch>> {
+pub fn sort_batches(
+    batches: &[Batch],
+    keys: &[SortKey],
+    limit: Option<usize>,
+) -> Result<Option<Batch>> {
     if batches.is_empty() {
         return Ok(None);
     }
@@ -119,7 +123,11 @@ pub fn sort_batches(batches: &[Batch], keys: &[SortKey], limit: Option<usize>) -
         }
         _ => idx.sort_by(|&a, &b| compare_rows(&views, a as usize, b as usize)),
     }
-    let columns = all.columns().iter().map(|c| Arc::new(c.gather(&idx))).collect();
+    let columns = all
+        .columns()
+        .iter()
+        .map(|c| Arc::new(c.gather(&idx)))
+        .collect();
     Ok(Some(Batch::try_new(columns, idx.len())?))
 }
 

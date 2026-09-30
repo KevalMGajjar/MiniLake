@@ -319,16 +319,20 @@ pub fn convert_stats(stats: Option<&Statistics>, conv: Conversion) -> ColumnStat
             v.max_opt().map(|x| ScalarValue::Date(*x)),
         ),
         (Statistics::Int32(v), Conversion::DecimalI32(sc)) => pick(
-            v.min_opt().map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
-            v.max_opt().map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
+            v.min_opt()
+                .map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
+            v.max_opt()
+                .map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
         ),
         (Statistics::Int64(v), Conversion::Int64) => pick(
             v.min_opt().map(|x| ScalarValue::Int64(*x)),
             v.max_opt().map(|x| ScalarValue::Int64(*x)),
         ),
         (Statistics::Int64(v), Conversion::DecimalI64(sc)) => pick(
-            v.min_opt().map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
-            v.max_opt().map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
+            v.min_opt()
+                .map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
+            v.max_opt()
+                .map(|x| ScalarValue::Float64(*x as f64 / pow10(sc))),
         ),
         (Statistics::Double(v), Conversion::Double) => pick(
             v.min_opt().map(|x| ScalarValue::Float64(*x)),
@@ -367,7 +371,9 @@ mod tests {
 
     #[test]
     fn dictionary_encoding_kicks_in() {
-        let vals: Vec<&[u8]> = (0..1000).map(|i| if i % 2 == 0 { &b"A"[..] } else { &b"B"[..] }).collect();
+        let vals: Vec<&[u8]> = (0..1000)
+            .map(|i| if i % 2 == 0 { &b"A"[..] } else { &b"B"[..] })
+            .collect();
         let c = encode_strings(vals.iter().copied(), None);
         assert!(matches!(c.data(), ColumnData::Dict(d) if d.dict.len() == 2));
         let uniq: Vec<String> = (0..100).map(|i| format!("v{i}")).collect();

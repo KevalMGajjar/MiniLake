@@ -32,7 +32,10 @@ fn check_swiss(batches: &[Vec<u64>], hash: fn(u64) -> u64) {
     }
     assert_eq!(table.len(), reference.len());
     for (&key, &gid) in &reference {
-        assert_eq!(table.find(hash(key), |p| keys.stored[p as usize] == key), Some(gid));
+        assert_eq!(
+            table.find(hash(key), |p| keys.stored[p as usize] == key),
+            Some(gid)
+        );
     }
 }
 

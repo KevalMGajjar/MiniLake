@@ -63,7 +63,13 @@ pub fn compare_string_scalar(op: BinaryOp, col: &Column, s: &[u8]) -> Vec<bool> 
 /// Compare two string columns row by row.
 pub fn compare_string_columns(op: BinaryOp, a: &Column, b: &Column) -> Vec<bool> {
     (0..a.len())
-        .map(|i| compare_bytes(op, a.str_bytes(i).unwrap_or(b""), b.str_bytes(i).unwrap_or(b"")))
+        .map(|i| {
+            compare_bytes(
+                op,
+                a.str_bytes(i).unwrap_or(b""),
+                b.str_bytes(i).unwrap_or(b""),
+            )
+        })
         .collect()
 }
 
@@ -76,7 +82,11 @@ pub fn compare_string_columns(op: BinaryOp, a: &Column, b: &Column) -> Vec<bool>
 /// The dense path is branch-free: it always writes the candidate index and
 /// advances the output cursor by 0 or 1. A data-dependent `if` here would
 /// mispredict ~50% of the time on selectivities near 50%.
-pub fn mask_to_selection(mask: &[bool], validity: Option<&Bitmap>, input: Option<&[u32]>) -> Vec<u32> {
+pub fn mask_to_selection(
+    mask: &[bool],
+    validity: Option<&Bitmap>,
+    input: Option<&[u32]>,
+) -> Vec<u32> {
     match (input, validity) {
         (None, None) => {
             let mut out = vec![0u32; mask.len()];

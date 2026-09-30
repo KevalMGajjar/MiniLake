@@ -338,7 +338,10 @@ impl Column {
         let validity = Bitmap::from_bools(&values.iter().map(|v| !v.is_null()).collect::<Vec<_>>());
         let data = match dt {
             DataType::Boolean => ColumnData::Boolean(
-                values.iter().map(|v| v.as_bool().unwrap_or(false)).collect(),
+                values
+                    .iter()
+                    .map(|v| v.as_bool().unwrap_or(false))
+                    .collect(),
             ),
             DataType::Int32 => ColumnData::Int32(
                 values
@@ -398,21 +401,31 @@ impl Column {
     pub fn slice(&self, offset: usize, len: usize) -> Column {
         let idx: Vec<u32> = (offset as u32..(offset + len) as u32).collect();
         match &self.data {
-            ColumnData::Boolean(v) => {
-                self.with_data(ColumnData::Boolean(v[offset..offset + len].to_vec()), offset, len)
-            }
-            ColumnData::Int32(v) => {
-                self.with_data(ColumnData::Int32(v[offset..offset + len].to_vec()), offset, len)
-            }
-            ColumnData::Int64(v) => {
-                self.with_data(ColumnData::Int64(v[offset..offset + len].to_vec()), offset, len)
-            }
-            ColumnData::Float64(v) => {
-                self.with_data(ColumnData::Float64(v[offset..offset + len].to_vec()), offset, len)
-            }
-            ColumnData::Date(v) => {
-                self.with_data(ColumnData::Date(v[offset..offset + len].to_vec()), offset, len)
-            }
+            ColumnData::Boolean(v) => self.with_data(
+                ColumnData::Boolean(v[offset..offset + len].to_vec()),
+                offset,
+                len,
+            ),
+            ColumnData::Int32(v) => self.with_data(
+                ColumnData::Int32(v[offset..offset + len].to_vec()),
+                offset,
+                len,
+            ),
+            ColumnData::Int64(v) => self.with_data(
+                ColumnData::Int64(v[offset..offset + len].to_vec()),
+                offset,
+                len,
+            ),
+            ColumnData::Float64(v) => self.with_data(
+                ColumnData::Float64(v[offset..offset + len].to_vec()),
+                offset,
+                len,
+            ),
+            ColumnData::Date(v) => self.with_data(
+                ColumnData::Date(v[offset..offset + len].to_vec()),
+                offset,
+                len,
+            ),
             _ => self.gather(&idx),
         }
     }
@@ -546,7 +559,10 @@ mod tests {
         s.push(b"");
         s.push(b"world");
         let c = Column::from_data(ColumnData::Utf8(s));
-        assert_eq!(c.gather(&[2]).scalar_at(0), ScalarValue::Utf8("world".into()));
+        assert_eq!(
+            c.gather(&[2]).scalar_at(0),
+            ScalarValue::Utf8("world".into())
+        );
         assert_eq!(c.str_bytes(1), Some(&b""[..]));
     }
 }

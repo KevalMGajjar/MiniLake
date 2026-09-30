@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use minilake_core::{Batch, Column, MiniLakeError, Result};
 
-use super::{batch_rows, AggMode, AggregateExpr, Accumulator};
+use super::{batch_rows, Accumulator, AggMode, AggregateExpr};
 use crate::context::TaskContext;
 use crate::pipeline::{BatchBuffer, LocalSink, Sink};
 
@@ -129,8 +129,7 @@ impl LocalSink for UngroupedLocal {
             None => *g = Some(self.accs),
             Some(global) => {
                 for (gacc, lacc) in global.iter_mut().zip(&self.accs) {
-                    let state: Vec<Arc<Column>> =
-                        lacc.state()?.into_iter().map(Arc::new).collect();
+                    let state: Vec<Arc<Column>> = lacc.state()?.into_iter().map(Arc::new).collect();
                     gacc.merge(&state, &[0])?;
                 }
             }

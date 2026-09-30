@@ -199,7 +199,11 @@ impl PhysicalPlan {
                     AggMode::Single => String::new(),
                     other => format!(" mode={other:?}"),
                 };
-                format!("{kind}:{m} group_by=[{}] aggs=[{}]", g.join(", "), a.join(", "))
+                format!(
+                    "{kind}:{m} group_by=[{}] aggs=[{}]",
+                    g.join(", "),
+                    a.join(", ")
+                )
             }
             PhysicalPlan::Sort { keys, limit, .. } => {
                 let k: Vec<String> = keys

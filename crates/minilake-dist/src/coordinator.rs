@@ -87,8 +87,9 @@ pub fn run(
         handles
             .into_iter()
             .map(|h| {
-                h.join()
-                    .unwrap_or_else(|_| Err(MiniLakeError::Internal("request thread panicked".into())))
+                h.join().unwrap_or_else(|_| {
+                    Err(MiniLakeError::Internal("request thread panicked".into()))
+                })
             })
             .collect()
     });
@@ -99,9 +100,8 @@ pub fn run(
         .zip(&assignment)
         .filter(|(_, files)| !files.is_empty());
     for ((addr, files), r) in contacted.zip(results) {
-        let (batches, t) = r.map_err(|e| {
-            MiniLakeError::Execution(format!("worker {addr} failed: {e}"))
-        })?;
+        let (batches, t) =
+            r.map_err(|e| MiniLakeError::Execution(format!("worker {addr} failed: {e}")))?;
         partials.extend(batches);
         worker_stats.push((addr.clone(), files.clone(), t));
     }

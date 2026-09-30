@@ -66,7 +66,9 @@ fn cell_eq(a: &str, b: &str) -> bool {
 }
 
 fn check_query(session: &Session, name: &str, golden: &Path) {
-    let sql_path = workspace_root().join("queries/tpch").join(format!("{name}.sql"));
+    let sql_path = workspace_root()
+        .join("queries/tpch")
+        .join(format!("{name}.sql"));
     let sql = std::fs::read_to_string(&sql_path).expect("query file");
     let expected_path = golden.join(format!("{name}.csv"));
     let Ok(expected) = std::fs::read_to_string(&expected_path) else {
@@ -85,7 +87,10 @@ fn check_query(session: &Session, name: &str, golden: &Path) {
     for (i, (g, w)) in got.iter().zip(&want).enumerate() {
         assert_eq!(g.len(), w.len(), "{name}: row {i} column count");
         for (j, (x, y)) in g.iter().zip(w).enumerate() {
-            assert!(cell_eq(x, y), "{name}: row {i} col {j}: minilake={x} duckdb={y}");
+            assert!(
+                cell_eq(x, y),
+                "{name}: row {i} col {j}: minilake={x} duckdb={y}"
+            );
         }
     }
 }

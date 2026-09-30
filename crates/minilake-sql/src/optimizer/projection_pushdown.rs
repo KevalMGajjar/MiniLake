@@ -89,7 +89,10 @@ fn prune(plan: LogicalPlan, used: &HashSet<(String, String)>) -> LogicalPlan {
                 .map(|(i, &t)| (i, t))
                 .collect();
             let new_schema = LogicalSchema {
-                fields: keep.iter().map(|(i, _)| schema.fields[*i].clone()).collect(),
+                fields: keep
+                    .iter()
+                    .map(|(i, _)| schema.fields[*i].clone())
+                    .collect(),
             };
             LogicalPlan::Scan {
                 table,
@@ -124,10 +127,7 @@ fn prune(plan: LogicalPlan, used: &HashSet<(String, String)>) -> LogicalPlan {
             schema,
         },
         LogicalPlan::Join {
-            left,
-            right,
-            on,
-            ..
+            left, right, on, ..
         } => {
             let left = prune(*left, used);
             let right = prune(*right, used);

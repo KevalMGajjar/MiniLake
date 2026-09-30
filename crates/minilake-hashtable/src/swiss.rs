@@ -256,7 +256,9 @@ impl SwissTable {
                 let mut m = match_tag(group, tag);
                 while m != 0 {
                     let i = g * GROUP + (m.trailing_zeros() / 8) as usize;
-                    if self.ctrl[i] == tag && self.hashes[i] == h && keys.equals(self.payloads[i], k)
+                    if self.ctrl[i] == tag
+                        && self.hashes[i] == h
+                        && keys.equals(self.payloads[i], k)
                     {
                         break 'probe self.payloads[i];
                     }
@@ -324,7 +326,10 @@ mod tests {
         }
         assert_eq!(t.len(), 10_000);
         for i in 0..10_000u64 {
-            assert_eq!(t.find(crate::hash::hash_u64(i), |p| p as u64 == i), Some(i as u32));
+            assert_eq!(
+                t.find(crate::hash::hash_u64(i), |p| p as u64 == i),
+                Some(i as u32)
+            );
         }
         assert_eq!(t.find(crate::hash::hash_u64(99_999), |_| true), None);
     }

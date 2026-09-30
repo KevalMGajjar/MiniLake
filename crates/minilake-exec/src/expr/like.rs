@@ -133,10 +133,22 @@ mod tests {
 
     #[test]
     fn shapes() {
-        assert_eq!(LikePattern::compile("PROMO%"), LikePattern::Prefix(b"PROMO".to_vec()));
-        assert_eq!(LikePattern::compile("%BRASS"), LikePattern::Suffix(b"BRASS".to_vec()));
-        assert_eq!(LikePattern::compile("%green%"), LikePattern::Contains(b"green".to_vec()));
-        assert!(matches!(LikePattern::compile("%a%b%"), LikePattern::General(_)));
+        assert_eq!(
+            LikePattern::compile("PROMO%"),
+            LikePattern::Prefix(b"PROMO".to_vec())
+        );
+        assert_eq!(
+            LikePattern::compile("%BRASS"),
+            LikePattern::Suffix(b"BRASS".to_vec())
+        );
+        assert_eq!(
+            LikePattern::compile("%green%"),
+            LikePattern::Contains(b"green".to_vec())
+        );
+        assert!(matches!(
+            LikePattern::compile("%a%b%"),
+            LikePattern::General(_)
+        ));
     }
 
     #[test]

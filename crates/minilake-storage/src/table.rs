@@ -34,7 +34,9 @@ pub struct TableFile {
 
 impl std::fmt::Debug for TableFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TableFile").field("path", &self.path).finish()
+        f.debug_struct("TableFile")
+            .field("path", &self.path)
+            .finish()
     }
 }
 
@@ -80,7 +82,11 @@ impl Table {
                     )));
                 }
                 let conv = Conversion::for_column(c)?;
-                fields.push(Field::new(c.name(), conv.data_type(), c.max_def_level() > 0));
+                fields.push(Field::new(
+                    c.name(),
+                    conv.data_type(),
+                    c.max_def_level() > 0,
+                ));
                 convs.push(conv);
                 defs.push(c.max_def_level());
             }
@@ -91,10 +97,11 @@ impl Table {
                     conversions = convs;
                     max_defs = defs;
                 }
-                Some(s) if s.fields.iter().map(|f| (&f.name, f.data_type)).eq(file_schema
-                    .fields
-                    .iter()
-                    .map(|f| (&f.name, f.data_type))) => {}
+                Some(s)
+                    if s.fields
+                        .iter()
+                        .map(|f| (&f.name, f.data_type))
+                        .eq(file_schema.fields.iter().map(|f| (&f.name, f.data_type))) => {}
                 Some(_) => {
                     return Err(MiniLakeError::Plan(format!(
                         "schema of {} differs from other files of table '{name}'",
@@ -174,10 +181,12 @@ impl Table {
             .row_groups
             .iter()
             .filter_map(|rg| {
-                keep.iter().position(|&k| k == rg.file).map(|new_idx| RowGroupMeta {
-                    file: new_idx,
-                    ..rg.clone()
-                })
+                keep.iter()
+                    .position(|&k| k == rg.file)
+                    .map(|new_idx| RowGroupMeta {
+                        file: new_idx,
+                        ..rg.clone()
+                    })
             })
             .collect();
         Table {
