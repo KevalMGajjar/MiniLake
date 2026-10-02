@@ -114,33 +114,6 @@ TPC-H queries in `queries/tpch/`: Q1, Q3, Q5, Q6, Q10, Q12, Q14. They are writte
 TPC-H text, not rewritten to fit the engine.
 
 ---
-
-## Benchmarks
-
-> **Status:** the harness is complete, but the numbers below have **not been measured yet**.
-> Every cell is filled by the command shown next to it. Nothing in this README is estimated.
-> See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for the full methodology.
-
-**Hardware / software** (fill in from your run): development machine was Windows 11 on ARM64,
-Qualcomm Snapdragon X Elite X1E78100 (12 Oryon cores, no SMT), 16 GB RAM, Rust 1.91.0.
-Record `rustc -vV`, `python -c "import duckdb; print(duckdb.__version__)"` and the storage device.
-
-### TPC-H SF1, median of 5 warm runs (ms)
-
-`python scripts/bench_minilake.py --data data/sf1 --threads 1 8 --runs 5 --duckdb --out results/sf1.json`
-
-| Query | MiniLake 1T | DuckDB 1T | MiniLake 8T | DuckDB 8T | MiniLake / DuckDB (8T) |
-|---|---|---|---|---|---|
-| Q1  | _ | _ | _ | _ | _ |
-| Q3  | _ | _ | _ | _ | _ |
-| Q5  | _ | _ | _ | _ | _ |
-| Q6  | _ | _ | _ | _ | _ |
-| Q10 | _ | _ | _ | _ | _ |
-| Q12 | _ | _ | _ | _ | _ |
-| Q14 | _ | _ | _ | _ | _ |
-
-SF10: same command with `--data data/sf10`.
-
 ### Thread scaling
 
 `python scripts/bench_minilake.py --data data/sf10 --threads 1 2 4 8 12 --runs 3 --plot results/scaling.png`
