@@ -1,6 +1,6 @@
 # MiniLake
 
-**MiniLake is a vectorized, multi-threaded, columnar SQL query engine written from scratch in Rust.**
+**MiniLake is a vectorized, multi-threaded, columnar SQL query engine written in Rust.**
 It runs analytical SQL (a TPC-H subset) directly over Parquet files. Queries flow through its own
 building blocks:
 
